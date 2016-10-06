@@ -1,0 +1,3 @@
+[submodule "argodsm"]
+	path = argodsm
+	url = https://github.com/etascale/argodsm.git
