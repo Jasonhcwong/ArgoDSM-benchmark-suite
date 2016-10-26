@@ -9,90 +9,101 @@
 #include "argo.hpp"
 
 struct thread_args {
-    int         tid;
-    int         data_begin;
-    int         data_end;
-    int         vertices;
+    int                thread_id;
+    int                data_begin;
+    int                data_end;
+    int                vertices;
+    pthread_barrier_t* barrier;
 };
 
 
-// global variables
+// ArgoDMS global variables
 bool *lock_flag;
-argo::globallock::global_tas_lock *lock; // single lock
+int*  test;          // test variable arrays for graph storage
+bool* exists;
+bool* dangling;
+int*  outlinks;      // array for outlinks
 
-int *test;          // test variable arrays for graph storage
-int *exist;
-int *test2;
-int *dangling;
-int *outlinks;      // array for outlinks
+double* dp;
+double* dp_threads;
 
-double *dp;      // dangling pointer variable
-double *dp_tid;
-
-double *pr_tmp;      // temporary pageranks
-double *pagerank;
+double* pagerank;
 
 double** W;
 int** W_index;
+
+
+
+
+// ArgoDSM node local variables
+argo::globallock::global_tas_lock *lock; // single lock
+int local_data_begin;
+std::vector<int>*  test_local;          // test variable arrays for graph storage
+std::vector<bool>* exists_local;
+std::vector<bool>* dangling_local;
+std::vector<int>*  outlinks_local;      // array for outlinks
+std::vector<double>* pagerank_local;      // array for outlinks
+
 
 void initialize_single_source(int vertices, double initial_rank);
 void init_weights(int vertices, int degree);
 
 
 void* do_work(void* argptr) {
-    // get the arguments
     thread_args* args = static_cast<thread_args*>(argptr);
 
-    // Let's declutter the code a bit, while also avoiding unnecessary global
-    // memory accesses
-    int tid                  = args->tid;
-    const int vertices       = args->vertices;
-    int i_start              = args->data_begin;
-    int i_stop               = args->data_end;
+    // Let's declutter the code a bit, while also avoiding unnecessary global memory accesses
+    int       thread_id         = args->thread_id;
+    const int vertices          = args->vertices;
+    int       data_begin        = args->data_begin;
+    int       data_end          = args->data_end;
+    pthread_barrier_t* barrier  = args->barrier;
 
-    double d                = 0.85;          // damping coefficient
+    double    damping_factor    = 0.85;
+    int       iterations        = 1;
 
-    // pagerank iteration count
-    int iterations = 1;
-
-    argo::barrier(); // ArgoDSM pthread_barrier_wait(arg->barrier);
+    //pthread_barrier_wait(barrier);
+    //argo::barrier();
 
     while(iterations > 0) {
-        if(tid == 0)
+        // think about this
+        if(thread_id == 0)
             *dp = 0;
 
-        argo::barrier();        // ArgoDSM pthread_barrier_wait(arg->barrier);
+        pthread_barrier_wait(barrier);
+        //argo::barrier();
 
-        // for no outlinks, dangling pages calculation
-        for(int v = i_start; v < i_stop; v++)
-            if(dangling[v] == 1)
-                dp_tid[tid] = dp_tid[tid] + d*(pagerank[v]/vertices);
+        for(int i = data_begin; i < data_end; i++)
+            if(dangling_local->at(i))
+                dp_threads[thread_id] += damping_factor*(pagerank[local_data_begin+i]/vertices);
 
-        lock->lock();           // ArgoDSM pthread_mutex_lock(&lock);
-        *dp = *dp + dp_tid[tid];
-        lock->unlock();         // ArgoDSM pthread_mutex_unlock(&lock);
+        lock->lock();
+        *dp = *dp + dp_threads[thread_id];
+        lock->unlock();
 
-        argo::barrier();        // ArgoDSM pthread_barrier_wait(arg->barrier);
+        pthread_barrier_wait(barrier);
+        argo::barrier();
 
-        // calculate pageranks
-        for(int v = i_start; v < i_stop; v++) {
-            if (exist[v] == 1) { // if vertex exists
-                pr_tmp[v] = 0.15;
-                for(int j = 0; j < test[v]; j++) // if inlink
-                    pr_tmp[v] = pr_tmp[v] + (d * pagerank[W_index[v][j]] / outlinks[W_index[v][j]]);
-                    /* replace d with dp if dangling pageranks required */
+        for(int i = data_begin; i < data_end; i++) {
+            if (exists_local->at(i)) {
+                pagerank_local->at(i) = 0.15;
+                for(int j = 0; j < test_local->at(i); j++)
+                    pagerank_local->at(i) += damping_factor * pagerank[W_index[local_data_begin+i][j]] / outlinks_local->at(W_index[local_data_begin+i][j]);
             }
-            if (pr_tmp[v] >= 1.0) pr_tmp[v] = 1.0;
+            if (pagerank_local->at(i) >= 1.0)
+                pagerank_local->at(i) = 1.0;
         }
 
-        argo::barrier();        // ArgoDSM pthread_barrier_wait(arg->barrier);
+        pthread_barrier_wait(barrier);
+        //argo::barrier();
 
-        // put temporary pageranks into final pageranks
-        for(int v = i_start; v < i_stop; v++)
-            if(exist[v] == 1)
-                pagerank[v] = pr_tmp[v];
+        for(int i = data_begin; i < data_end; i++)
+            if(exists_local->at(i))
+                pagerank[local_data_begin+i] = pagerank_local->at(i);
 
-        argo::barrier();        // ArgoDSM pthread_barrier_wait(arg->barrier);
+
+        pthread_barrier_wait(barrier);
+        argo::barrier();
 
         iterations--;
     }
@@ -140,15 +151,13 @@ int main(int argc, char* argv[]) {
 
     // ArgoDSM memory allocations
     //
-    dp       = argo::conew_<double>(0);
-    dp_tid   = argo::conew_array<double>(num_threads);
+    dp         = argo::conew_<double>(0);
+    dp_threads = argo::conew_array<double>(num_threads);
 
     pagerank = argo::conew_array<double>(vertices);
-    pr_tmp   = argo::conew_array<double>(vertices);
     test     = argo::conew_array<int>(vertices);
-    exist    = argo::conew_array<int>(vertices);
-    test2    = argo::conew_array<int>(vertices);
-    dangling = argo::conew_array<int>(vertices);
+    exists   = argo::conew_array<bool>(vertices);
+    dangling = argo::conew_array<bool>(vertices);
     outlinks = argo::conew_array<int>(vertices);
 
     lock_flag = argo::conew_<bool>(false);       // ArgoDSM pthread_mutex_init(&lock, NULL);
@@ -173,9 +182,8 @@ int main(int argc, char* argv[]) {
                 W_index[i][j] = std::numeric_limits<int>::max();
             }
             test[i]     = 0;
-            exist[i]    = 0;
-            test2[i]    = 0;
-            dangling[i] = 0;
+            exists[i]   = false;
+            dangling[i] = false;
             outlinks[i] = 0;
         }
 
@@ -214,18 +222,17 @@ int main(int argc, char* argv[]) {
                     W_index[number1][inter] = number0;
                     test[number1]++;
                     outlinks[number0]++;
-                    exist[number0] = 1;
-                    exist[number1] = 1;
-                    test2[number0] = 1;
-                    dangling[number1] = 1;
+                    exists[number0] = true;
+                    exists[number1] = true;
+                    dangling[number1] = true;
                     if(number0 > nodecount) nodecount = number0;
                     if(number1 > nodecount) nodecount = number1;
                 }
             }
             nodecount++;
             for(int i = 0; i < vertices; i++) {
-                if(test2[i] == 1 && dangling[i] == 1)
-                    dangling[i] = 0;
+                if(exists[i] && dangling[i])
+                    dangling[i] = false;
             }
             printf("\nLargest Vertex: %d", nodecount);
             vertices = nodecount;
@@ -241,9 +248,9 @@ int main(int argc, char* argv[]) {
                 outlinks[i] = rand()%(div); //random outlinks
                 if(outlinks[i] == 0)
                     outlinks[i] = vertices;
-                exist[i] = 1;
+                exists[i] = true;
                 if (i % 100 == 0)
-                    dangling[i] = 1;
+                    dangling[i] = true;
                 test[i] = degree;
             }
         }
@@ -255,24 +262,45 @@ int main(int argc, char* argv[]) {
 
     argo::barrier();
 
-    // Start the threads
+
+    int node_chunk = vertices / argo::number_of_nodes();
+    local_data_begin = argo::node_id() * node_chunk;
+
+    test_local     = new std::vector<int>(node_chunk);
+    exists_local   = new std::vector<bool>(node_chunk);
+    dangling_local = new std::vector<bool>(node_chunk);
+    outlinks_local = new std::vector<int>(node_chunk);
+    pagerank_local = new std::vector<double>(node_chunk);
+
+    for (int i = 0; i < node_chunk; i++) {
+        test_local->at(i) = test[i];
+        exists_local->at(i) = exists[i];
+        dangling_local->at(i) = dangling[i];
+        outlinks_local->at(i) = outlinks[i];
+    }
+
     int local_num_threads = num_threads / argo::number_of_nodes();
-    int chunk = vertices / num_threads;
+
+    pthread_barrier_t barrier;
+    pthread_barrier_init(&barrier, NULL, local_num_threads);
+
+    int thread_chunk = vertices / num_threads;
     std::vector<pthread_t> threads(local_num_threads);
     std::vector<thread_args> args(local_num_threads);
+
     for (int i = 0; i < local_num_threads; ++i) {
-        int global_tid = (argo::node_id() * local_num_threads) + i;
-        args[i].tid = global_tid;
-        args[i].data_begin = global_tid * chunk;
-        args[i].data_end = args[i].data_begin + chunk;
+        int global_thread_id = (argo::node_id() * local_num_threads) + i;
+        args[i].thread_id = global_thread_id;
+        args[i].data_begin = i * thread_chunk;
+        args[i].data_end = args[i].data_begin + thread_chunk;
         args[i].vertices = vertices;
+        args[i].barrier = &barrier;
         pthread_create(&threads[i], nullptr, do_work, &args[i]);
     }
-    // Join the threads
+
     for (auto &t : threads)
         pthread_join(t, nullptr);
 
-    // Make sure everyone is done and get the changes
     argo::barrier();
 
     if (argo::node_id() == 0) {
@@ -280,12 +308,34 @@ int main(int argc, char* argv[]) {
         FILE *f1 = fopen("file.txt", "w");
 
         for(int i = 0; i < vertices; i++) {
-            if(exist[i] == 1)
+            if(exists[i])
                 fprintf(f1,"pr(%d) = %f\n", i,pagerank[i]);
         }
         printf("\n");
         fclose(f1);
     }
+
+    delete test_local;
+    delete exists_local;
+    delete dangling_local;
+    delete outlinks_local;
+    delete pagerank_local;
+
+    delete lock;
+
+    argo::codelete_array(test);
+    argo::codelete_array(exists);
+    argo::codelete_array(dangling);
+    argo::codelete_array(outlinks);
+
+    argo::codelete_array(W);
+    argo::codelete_array(W_index);
+
+    argo::codelete_array(pagerank);
+    argo::codelete_(lock_flag);
+
+    argo::codelete_array(dp_threads);
+    argo::codelete_(dp);
 
     argo::finalize();
 }
@@ -293,54 +343,37 @@ int main(int argc, char* argv[]) {
 
 
 void initialize_single_source(int vertices, double initial_rank) {
-   for(int i = 0; i < vertices; i++) {
-      pagerank[i] = initial_rank;
-      pr_tmp[i] = initial_rank;
-   }
+    for(int i = 0; i < vertices; i++)
+        pagerank[i] = initial_rank;
 }
 
 
-void init_weights(int vertices, int degree)
-{
-   // Initialize to -1
-   for(int i = 0; i < vertices; i++)
-      for(int j = 0; j < degree; j++)
-         W_index[i][j]= -1;
 
-   // Populate Index Array
-   for(int i = 0; i < vertices; i++)
-   {
-      int max = degree;
-      for(int j = 0; j < degree; j++)
-      {
-         if(W_index[i][j] == -1)
-         {
-            int neighbor = rand()%(i+max*2);
-            if(neighbor<j)
-               W_index[i][j] = neighbor;
+void init_weights(int vertices, int degree) {
+    for(int i = 0; i < vertices; i++)
+        for(int j = 0; j < degree; j++)
+            W_index[i][j]= -1;
+
+    for(int i = 0; i < vertices; i++) {
+        for(int j = 0; j < degree; j++) {
+            if(W_index[i][j] == -1) {
+                int neighbor = rand() % (i + degree * 2);
+                if(neighbor < j)
+                    W_index[i][j] = neighbor;
+                else
+                    W_index[i][j] = vertices-1;
+            }
+            if(W_index[i][j] >= vertices)
+                W_index[i][j] = vertices-1;
+        }
+    }
+
+    for(int i = 0; i < vertices; i++) {
+        for(int j = 0; j < degree; j++) {
+            if(W_index[i][j] == i)
+                W[i][j] = 0;
             else
-               W_index[i][j] = vertices-1;
-         }
-         else
-         {
-         }
-         if(W_index[i][j]>=vertices)
-         {
-            W_index[i][j] = vertices-1;
-         }
-      }
-   }
-
-   // Populate Cost Array
-   for(int i = 0; i < vertices; i++)
-   {
-      for(int j = 0; j < degree; j++)
-      {
-        if(W_index[i][j] == i)
-         W[i][j] = 0;
-
-         else
-            W[i][j] = 0;//(double) (v) + 1;
-      }
-   }
+                W[i][j] = 0;
+        }
+    }
 }
