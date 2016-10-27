@@ -36,6 +36,7 @@ ifeq ($(LINKAGE),dynamic)
 CFLAGS += -fPIC -O3
 endif
 
+
 .PHONY: default all clean
 
 SRCS := \
@@ -49,6 +50,7 @@ default: all
 all: $(HOME)/$(LIB_DIR)/$(TARGET)
 
 $(HOME)/$(LIB_DIR)/$(TARGET): $(TARGET)
+	mkdir -p $(HOME)/$(LIB_DIR)
 	cp $< $(HOME)/$(LIB_DIR)
 
 $(LIB_PHOENIX).a: $(OBJS)

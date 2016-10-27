@@ -27,6 +27,8 @@
 
 # This Makefile requires GNU make.
 
+CXX = mpic++
+
 # Query the shell to compile the code correctly for different architectures.
 OSTYPE = $(shell uname)
 
@@ -38,8 +40,9 @@ ifeq ($(OSTYPE),Linux)
 OS = -D_LINUX_
 DEBUG = -g
 #NUMA = -DNUMA_SUPPORT
-CFLAGS = $(DEBUG) -Wall -O3 $(OS) $(NUMA) -DMMAP_POPULATE -fstrict-aliasing -Wstrict-aliasing 
-LIBS = -lpthread -lrt
+#CFLAGS = $(DEBUG) -Wall -O3 $(OS) $(NUMA) -DMMAP_POPULATE -fstrict-aliasing -Wstrict-aliasing 
+CFLAGS = $(DEBUG) -Wall $(OS) $(NUMA) -DMMAP_POPULATE -fstrict-aliasing -Wstrict-aliasing -std=c++11 -L../../argo_install_dir/lib -I../../argo_install_dir/include 
+LIBS = -largo -largobackend-mpi -lpthread -lrt 
 endif
 
 ifeq ($(OSTYPE),SunOS)
@@ -69,6 +72,11 @@ endif
 
 CFLAGS += $(ARCH)
 
+SRC_DIR = src
+LIB_DIR = lib
+INC_DIR = include
+TESTS_DIR = tests
+
 # The $(OS) flag is included here to define the OS-specific constant so that
 # only the appropriate portions of the application get compiled. See the README
 # file for more information.
@@ -90,7 +98,3 @@ TARGET = $(LIB_PHOENIX).so
 LIB_DEP =
 endif
 
-SRC_DIR = src
-LIB_DIR = lib
-INC_DIR = include
-TESTS_DIR = tests

@@ -1,0 +1,6 @@
+# follow argo's quickstart guide until cmake
+# use the following cmake command and make command
+cmake -DARGO_BACKEND_MPI=ONcmake -DARGO_BACKEND_MPI=ON -DARGO_BACKEND_SINGLENODE=ON -DARGO_TESTS=ON -DBUILD_DOCUMENTATION=ON -DCMAKE_CXX_COMPILER=mpic++ -DCMAKE_CXX_COMPILER=mpic++ -DCMAKE_C_COMPILER=mpicc -DCMAKE_INSTALL_PREFIX:PATH=../../phoenix++-1.0/argo_install_dir/ ../
+
+make install
+

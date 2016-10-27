@@ -43,6 +43,8 @@
 #include "locality.h"
 #include "thread_pool.h"
 
+#include "argo/argo.hpp"
+
 template<typename Impl, typename D, typename K, typename V, 
     class Container = hash_container<K, V, buffer_combiner> >
 class MapReduce
@@ -75,6 +77,8 @@ protected:
 
     container_type container; 
     std::vector<keyval>* final_vals;    // Array to send to merge task.    
+
+    int *argo_data;
     
     uint64_t num_map_tasks;
     uint64_t num_reduce_tasks;
@@ -146,11 +150,17 @@ public:
         // number of processors
         int threads = atoi(GETENV("MR_NUMTHREADS"));
         setThreads(threads > 0 ? threads : proc_get_num_cpus(), 0);
+
+        argo::init(100*1024*1024UL);
+        argo_data = argo::conew_array<int>(10*1024*1024UL);
     }
 
     virtual ~MapReduce() {
         if(this->threadPool != NULL) delete this->threadPool;
         if(this->taskQueue != NULL) delete this->taskQueue;
+
+        argo::codelete_array(argo_data);
+        argo::finalize();
     }
 
     // override the default thread offset and thread count.
@@ -199,7 +209,7 @@ run (std::vector<keyval>& result)
 
     // Run splitter to generate chunks
     get_time (begin);
-    while (static_cast<Impl const*>(this)->split(chunk))
+    while (static_cast<Impl *>(this)->split(chunk))
     {
         data.push_back(chunk);
     }
@@ -281,7 +291,7 @@ run_map (data_type* data, uint64_t count)
         {
             uint64_t len = std::min(chunk_size, count-start);
             int lgrp = loc_mem_to_lgrp (
-                static_cast<Impl const*>(this)->locate(data+start, len));
+                static_cast<Impl *>(this)->locate(data+start, len));
                 task_queue::task_t task = 
                     // For debugging, last element is normally padding
                     {    i, len, (uint64_t)(data+start), lgrp };    
@@ -289,7 +299,7 @@ run_map (data_type* data, uint64_t count)
         }
     }
 
-    start_workers (&map_callback, std::min(num_map_tasks, num_threads), "map"); 
+    this->start_workers (&map_callback, std::min(num_map_tasks, num_threads), "map"); 
 }
 
 /**
@@ -307,7 +317,7 @@ map_worker(thread_loc const& loc, double& time, double& user_time, int& tasks)
     	timespec user_begin = get_time();
 	for (data_type* data = (data_type*)task.data; 
             data < (data_type*)task.data + task.len; ++data) {
-            static_cast<Impl const*>(this)->map(*data, t);
+            static_cast<Impl *>(this)->map(*data, t);
         }
     	user_time += time_elapsed(user_begin);
     }
@@ -328,7 +338,7 @@ void MapReduce<Impl, D, K, V, Container>::run_reduce ()
         this->taskQueue->enqueue_seq(task, this->num_reduce_tasks);
     }
 
-    start_workers (&reduce_callback, 
+    this->start_workers (&reduce_callback, 
         std::min(this->num_reduce_tasks, num_threads), "reduce");
 }
 
@@ -354,7 +364,7 @@ void MapReduce<Impl, D, K, V, Container>::reduce_worker (
         while(i.next(key, values))
         {
             if(values.size() > 0)
-                static_cast<Impl const*>(this)->reduce(
+                static_cast<Impl *>(this)->reduce(
                     key, values, this->final_vals[loc.thread]);
         }
         user_time += time_elapsed(user_begin);
@@ -475,7 +485,7 @@ protected:
                 { i, 0, (uint64_t)&this->final_vals[i], 0 };
             this->taskQueue->enqueue_seq(task, merge_queues);
         }
-        start_workers(&this->merge_callback, this->num_threads, "merge");
+        this->start_workers(&this->merge_callback, this->num_threads, "merge");
 
         // Then merge
         std::vector<keyval>* merge_vals;
@@ -506,7 +516,7 @@ protected:
             }
 
             // Run merge tasks and get merge values.
-            start_workers (&this->merge_callback, 
+            this->start_workers (&this->merge_callback, 
                 std::min(resulting_queues, this->num_threads), "merge");
 
             delete [] merge_vals;
