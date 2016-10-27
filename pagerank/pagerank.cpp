@@ -9,7 +9,8 @@
 #include "argo.hpp"
 
 struct thread_args {
-    int                thread_id;
+    int                global_thread_id;
+    int                local_thread_id;
     int                data_begin;
     int                data_end;
     int                vertices;
@@ -18,6 +19,8 @@ struct thread_args {
 
 
 // ArgoDMS global variables
+thread_args* arguments;
+
 bool *lock_flag;
 int*  test;          // test variable arrays for graph storage
 bool* exists;
@@ -53,7 +56,8 @@ void* do_work(void* argptr) {
     thread_args* args = static_cast<thread_args*>(argptr);
 
     // Let's declutter the code a bit, while also avoiding unnecessary global memory accesses
-    int       thread_id         = args->thread_id;
+    int       global_thread_id  = args->global_thread_id;
+    //int       local_thread_id   = args->local_thread_id;
     const int vertices          = args->vertices;
     int       data_begin        = args->data_begin;
     int       data_end          = args->data_end;
@@ -62,23 +66,23 @@ void* do_work(void* argptr) {
     double    damping_factor    = 0.85;
     int       iterations        = 1;
 
-    //pthread_barrier_wait(barrier);
+    pthread_barrier_wait(barrier);
     //argo::barrier();
 
     while(iterations > 0) {
         // think about this
-        if(thread_id == 0)
+        if(global_thread_id == 0)
             *dp = 0;
 
         pthread_barrier_wait(barrier);
-        //argo::barrier();
+        argo::barrier();
 
         for(int i = data_begin; i < data_end; i++)
             if(dangling_local->at(i))
-                dp_threads[thread_id] += damping_factor*(pagerank[local_data_begin+i]/vertices);
+                dp_threads[global_thread_id] += damping_factor*(pagerank[local_data_begin+i]/vertices);
 
         lock->lock();
-        *dp = *dp + dp_threads[thread_id];
+        *dp = *dp + dp_threads[global_thread_id];
         lock->unlock();
 
         pthread_barrier_wait(barrier);
@@ -98,14 +102,16 @@ void* do_work(void* argptr) {
         //argo::barrier();
 
         for(int i = data_begin; i < data_end; i++)
-            if(exists_local->at(i))
+            if(exists_local->at(i)) {
                 pagerank[local_data_begin+i] = pagerank_local->at(i);
-
+                printf("%d\n", local_data_begin+i);
+            }
 
         pthread_barrier_wait(barrier);
         argo::barrier();
 
         iterations--;
+
     }
 
     return NULL;
@@ -147,10 +153,9 @@ int main(int argc, char* argv[]) {
     // Initialize ArgoDSM with 1 GB of Storage
     argo::init(0.5*1024*1024*1024UL);
 
-    printf("debug before argoDSM\n");
-
     // ArgoDSM memory allocations
-    //
+    arguments = argo::conew_array<thread_args>(num_threads);
+
     dp         = argo::conew_<double>(0);
     dp_threads = argo::conew_array<double>(num_threads);
 
@@ -163,22 +168,17 @@ int main(int argc, char* argv[]) {
     lock_flag = argo::conew_<bool>(false);       // ArgoDSM pthread_mutex_init(&lock, NULL);
     lock = new argo::globallock::global_tas_lock(lock_flag);
 
-    W = argo::conew_array<double*>(vertices);
     W_index = argo::conew_array<int*>(vertices);
 
     for(int i = 0; i < vertices; i++) {
-        W[i] = argo::conew_array<double>(degree);
         W_index[i] = argo::conew_array<int>(degree);
     }
-
-    printf("debug before single node argoDSM\n");
 
     // ArgoDSM memory initialization done by a single node
     if (argo::node_id() == 0) {
 
         for(int i = 0; i < vertices; i++) {
             for(int j = 0; j < degree; j++) {
-                W[i][j] = std::numeric_limits<double>::max();
                 W_index[i][j] = std::numeric_limits<int>::max();
             }
             test[i]     = 0;
@@ -218,7 +218,6 @@ int main(int argc, char* argv[]) {
                     }
 
                     inter = test[number1];
-                    W[number0][inter] = 0; //drand48();
                     W_index[number1][inter] = number0;
                     test[number1]++;
                     outlinks[number0]++;
@@ -262,9 +261,34 @@ int main(int argc, char* argv[]) {
 
     argo::barrier();
 
+    int local_num_threads = num_threads / argo::number_of_nodes();
 
-    int node_chunk = vertices / argo::number_of_nodes();
-    local_data_begin = argo::node_id() * node_chunk;
+    if (argo::node_id() == 0) {
+        int node_chunk = 0;
+        int thread_chunk = vertices / num_threads;
+        int rem = vertices % num_threads;
+        for (int i = 0; i < num_threads; i++) {
+            arguments[i].global_thread_id = i;
+            arguments[i].vertices = vertices;
+            if (node_chunk % local_num_threads == 0)
+                node_chunk = 0;
+            if (rem != 0 && arguments[i].global_thread_id < rem) {
+                arguments[i].data_begin = node_chunk;
+                arguments[i].data_end = arguments[i].data_begin + (thread_chunk+1);
+                node_chunk += (thread_chunk+1);
+                rem--;
+            } else {
+                arguments[i].data_begin = node_chunk;
+                arguments[i].data_end = arguments[i].data_begin + thread_chunk;
+                node_chunk += thread_chunk;
+            }
+        }
+    }
+
+    argo::barrier();
+
+    int node_threads_begin = argo::node_id() * local_num_threads;
+    int node_chunk = arguments[node_threads_begin + local_num_threads - 1].data_end;
 
     test_local     = new std::vector<int>(node_chunk);
     exists_local   = new std::vector<bool>(node_chunk);
@@ -272,30 +296,26 @@ int main(int argc, char* argv[]) {
     outlinks_local = new std::vector<int>(node_chunk);
     pagerank_local = new std::vector<double>(node_chunk);
 
-    for (int i = 0; i < node_chunk; i++) {
-        test_local->at(i) = test[i];
-        exists_local->at(i) = exists[i];
-        dangling_local->at(i) = dangling[i];
-        outlinks_local->at(i) = outlinks[i];
-    }
+    local_data_begin = 0;
+    for (int i = 0; i < node_threads_begin; i++)
+        local_data_begin += arguments[i].data_end - arguments[i].data_begin;
 
-    int local_num_threads = num_threads / argo::number_of_nodes();
+    for (int i = 0; i < node_chunk; i++) {
+        test_local->at(i)     = test[local_data_begin+i];
+        exists_local->at(i)   = exists[local_data_begin+i];
+        dangling_local->at(i) = dangling[local_data_begin+i];
+        outlinks_local->at(i) = outlinks[local_data_begin+i];
+    }
 
     pthread_barrier_t barrier;
     pthread_barrier_init(&barrier, NULL, local_num_threads);
-
-    int thread_chunk = vertices / num_threads;
     std::vector<pthread_t> threads(local_num_threads);
-    std::vector<thread_args> args(local_num_threads);
 
-    for (int i = 0; i < local_num_threads; ++i) {
-        int global_thread_id = (argo::node_id() * local_num_threads) + i;
-        args[i].thread_id = global_thread_id;
-        args[i].data_begin = i * thread_chunk;
-        args[i].data_end = args[i].data_begin + thread_chunk;
-        args[i].vertices = vertices;
-        args[i].barrier = &barrier;
-        pthread_create(&threads[i], nullptr, do_work, &args[i]);
+    for (int i = 0; i < local_num_threads; i++) {
+        int j = node_threads_begin + i;
+        arguments[j].local_thread_id = i;
+        arguments[j].barrier = &barrier;
+        pthread_create(&threads[i], nullptr, do_work, &arguments[j]);
     }
 
     for (auto &t : threads)
@@ -320,22 +340,18 @@ int main(int argc, char* argv[]) {
     delete dangling_local;
     delete outlinks_local;
     delete pagerank_local;
-
     delete lock;
 
     argo::codelete_array(test);
     argo::codelete_array(exists);
     argo::codelete_array(dangling);
     argo::codelete_array(outlinks);
-
-    argo::codelete_array(W);
     argo::codelete_array(W_index);
-
     argo::codelete_array(pagerank);
     argo::codelete_(lock_flag);
-
     argo::codelete_array(dp_threads);
     argo::codelete_(dp);
+    argo::codelete_array(arguments);
 
     argo::finalize();
 }
@@ -365,15 +381,6 @@ void init_weights(int vertices, int degree) {
             }
             if(W_index[i][j] >= vertices)
                 W_index[i][j] = vertices-1;
-        }
-    }
-
-    for(int i = 0; i < vertices; i++) {
-        for(int j = 0; j < degree; j++) {
-            if(W_index[i][j] == i)
-                W[i][j] = 0;
-            else
-                W[i][j] = 0;
         }
     }
 }
