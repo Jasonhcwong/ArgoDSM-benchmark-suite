@@ -11,6 +11,14 @@
 
 #include "argo.hpp"
 
+// Pagerank Constants
+int    ARGO_MEMORY      = 0.5; // GB
+int    MAX_VERTICES     = 2000000;
+int    MAX_DEGREE       = 16;
+double DAMPING_FACTOR   = 0.85;
+int    ITERATIONS       = 40;
+
+
 struct Thread_args {
     int global_thread_id;
     int data_begin;
@@ -33,12 +41,6 @@ int global_num_threads;
 int local_num_threads;
 argo::globallock::global_tas_lock *lock; // single lock
 Chunk* chunk;
-
-// Pagerank Constants
-int    MAX_VERTICES     = 2000000;
-int    MAX_DEGREE       = 16;
-double DAMPING_FACTOR   = 0.85;
-int    ITERATIONS       = 40;
 
 
 // ArgoDMS global variables
@@ -164,9 +166,9 @@ void write_pagerank_to_file(std::string filename, double* pagerank, int size) {
 int main(int argc, char* argv[]) {
 
     // Startup ArgoDSM
-    argo::init(0.5*1024*1024*1024UL);
+    argo::init(ARGO_MEMORY*1024*1024*1024UL);
 
-    if (argc > 4) {
+    if (argc != 4) {
         std::cout << "Wrong number of arguments" << std::endl;
         return 0;
     }
@@ -247,17 +249,8 @@ int main(int argc, char* argv[]) {
 
     for (int j = 0; j < chunk->size; j++) {
         chunk->inlinks[j]     = inlinks[chunk->begin+j];
-        std::cout << "inlinks[" << (chunk->begin+j) << "] = " << inlinks[chunk->begin+j] << "\n";
         chunk->exists[j]   = exists[chunk->begin+j];
-        std::cout << "exists[" << (chunk->begin+j) << "] = " << exists[chunk->begin+j] << "\n";
         chunk->outlinks[j] = outlinks[chunk->begin+j];
-        std::cout << "outlinks[" << (chunk->begin+j) << "] = " << outlinks[chunk->begin+j] << std::endl;
-    }
-
-    //Debug
-    std::cout << "argo::number_of_nodes = " << argo::number_of_nodes() << "\nargo::node_id = " << argo::node_id() << "\nchunk->size = " << chunk->size << "\nlocal_num_threads = " << local_num_threads << std::endl;
-    for (int i = 0; i < global_num_threads; i++) {
-        std::cout << "thread[ "<< i <<" ]: " << arguments[i].data_begin << " - " << arguments[i].data_end << std::endl;
     }
 
     std::vector<pthread_t> threads(local_num_threads);
