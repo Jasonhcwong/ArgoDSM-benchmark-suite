@@ -12,7 +12,6 @@
 #include "argo.hpp"
 
 // Pagerank Constants
-int    ARGO_MEMORY      = 0.5; // GB
 int    MAX_VERTICES     = 2000000;
 int    MAX_DEGREE       = 16;
 double DAMPING_FACTOR   = 0.85;
@@ -166,7 +165,7 @@ void write_pagerank_to_file(std::string filename, double* pagerank, int size) {
 int main(int argc, char* argv[]) {
 
     // Startup ArgoDSM
-    argo::init(ARGO_MEMORY*1024*1024*1024UL);
+    argo::init(0.5*1024*1024*1024UL);
 
     if (argc != 4) {
         std::cout << "Wrong number of arguments" << std::endl;
@@ -266,7 +265,8 @@ int main(int argc, char* argv[]) {
 
     argo::barrier();
 
-    write_pagerank_to_file(output_filename, pagerank, vertices);
+    if (argo::node_id() == *io_node_id)
+        write_pagerank_to_file(output_filename, pagerank, vertices);
 
     delete chunk;
     delete lock;
