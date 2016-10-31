@@ -78,7 +78,7 @@ protected:
     container_type container; 
     std::vector<keyval>* final_vals;    // Array to send to merge task.    
 
-    int *argo_data;
+    //int *argo_data; //Is it really necessary to have it as a class member? 
     
     uint64_t num_map_tasks;
     uint64_t num_reduce_tasks;
@@ -151,16 +151,16 @@ public:
         int threads = atoi(GETENV("MR_NUMTHREADS"));
         setThreads(threads > 0 ? threads : proc_get_num_cpus(), 0);
 
-        argo::init(100*1024*1024UL);
-        argo_data = argo::conew_array<int>(10*1024*1024UL);
+        //argo::init(100*1024*1024UL);
+        //argo_data = argo::conew_array<int>(10*1024*1024UL);
     }
 
     virtual ~MapReduce() {
         if(this->threadPool != NULL) delete this->threadPool;
         if(this->taskQueue != NULL) delete this->taskQueue;
 
-        argo::codelete_array(argo_data);
-        argo::finalize();
+        //argo::codelete_array(argo_data);
+        //argo::finalize();
     }
 
     // override the default thread offset and thread count.
@@ -204,18 +204,21 @@ run (std::vector<keyval>& result)
 {
     timespec begin;    
     std::vector<D> data;
+
     uint64_t count;
     D chunk;
 
     // Run splitter to generate chunks
+    int i = 0;
     get_time (begin);
     while (static_cast<Impl *>(this)->split(chunk))
     {
         data.push_back(chunk);
+        
     }
+
     count = data.size();
     print_time_elapsed("split phase", begin);
-
     return run(&data[0], count, result);
 }
 
@@ -223,11 +226,16 @@ template<typename Impl, typename D, typename K, typename V, class Container>
 int MapReduce<Impl, D, K, V, Container>::
 run (D *data, uint64_t count, std::vector<keyval>& result)
 {
-    timespec begin;    
+    timespec begin;
+    D* argo_data;
     timespec run_begin = get_time();
     // Initialize library
     get_time (begin);
-
+    //Adding data to sharedMemory
+    argo_data = argo::conew_array<D>(count);
+    for (int i = 0; i < count; i++) {
+        argo_data[i] = data[i];
+    }
     // Compute task counts (should make this more adjustable) and then 
     // allocate storage
     this->num_map_tasks = std::min(count, this->num_threads) * 16;
@@ -245,7 +253,8 @@ run (D *data, uint64_t count, std::vector<keyval>& result)
 
     // Run map tasks and get intermediate values
     get_time (begin);
-    run_map(&data[0], count);
+
+    run_map(&argo_data[0], count);
     print_time_elapsed("map phase", begin);
 
     dprintf("In scheduler, all map tasks are done, now scheduling reduce tasks\n");
@@ -254,6 +263,7 @@ run (D *data, uint64_t count, std::vector<keyval>& result)
     get_time (begin);
     run_reduce();
     print_time_elapsed("reduce phase", begin);
+    printf("cd\n");
 
     dprintf("In scheduler, all reduce tasks are done, now scheduling merge tasks\n");
 
@@ -278,12 +288,17 @@ template<typename Impl, typename D, typename K, typename V, class Container>
 void MapReduce<Impl, D, K, V, Container>::
 run_map (data_type* data, uint64_t count)
 {
+    printf("ca\n");
+
+    uint64_t number_of_nodes = argo::number_of_nodes();
+    uint64_t node_number = argo::node_id();
+    printf("cb\n");
     // Compute map task chunk size
     uint64_t chunk_size = 
         std::max(1, (int)ceil((double)count / this->num_map_tasks));
     
     // Generate tasks by splitting input data and add to queue.
-    for(uint64_t i = 0; i < this->num_map_tasks; i++)
+    for(uint64_t i = node_number; i < this->num_map_tasks; i +=number_of_nodes)
     {
         uint64_t start = chunk_size * i;
 
@@ -295,6 +310,7 @@ run_map (data_type* data, uint64_t count)
                 task_queue::task_t task = 
                     // For debugging, last element is normally padding
                     {    i, len, (uint64_t)(data+start), lgrp };    
+
             this->taskQueue->enqueue_seq (task, this->num_map_tasks, lgrp);
         }
     }
