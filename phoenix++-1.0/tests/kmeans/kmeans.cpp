@@ -217,7 +217,7 @@ int main(int argc, char **argv)
     double inter_library_time = 0;
 
     get_time (begin);
-    
+    argo::init(100*1024*1024UL);
     parse_args(argc, argv);    
     
     // get points

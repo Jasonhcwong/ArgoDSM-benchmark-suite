@@ -188,7 +188,7 @@ class CovMR : public MapReduceSort<CovMR, pca_cov_data_t, intptr_t, long long, f
 class CovMR : public MapReduceSort<CovMR, pca_cov_data_t, intptr_t, long long, common_array_container<intptr_t, long long, one_combiner, 1000*1000
 #endif
 #ifdef TBB
-    , tbb::scalable_allocator
+    , tbb::scalable_allocatorrun
 #endif
 > >
 {
@@ -273,15 +273,15 @@ int main(int argc, char **argv)
     generate_points(matrix, num_rows, num_cols);
     
     // Print the points
-    //dump_points(matrix, num_rows, num_cols);
+    dump_points(matrix, num_rows, num_cols);
     
     // Setup scheduler args for computing the mean
     
     printf("PCA Mean: Calling MapReduce Scheduler\n");
+    argo::init(100*1024*1024UL);
 
     get_time (end);
     print_time("initialize", begin, end);
-
     get_time (begin); 
     std::vector<MeanMR::keyval> result;
     MeanMR meanMR(matrix);
@@ -291,6 +291,7 @@ int main(int argc, char **argv)
     printf("PCA Mean: MapReduce Completed\n"); 
     
     get_time (begin);
+    printf("result_size() = %i, num_rows = %i, first res = %i\n", result.size(), num_rows, result[0].val);
     assert (result.size() == (size_t)num_rows);
     
     long long* means = new long long[num_rows];
