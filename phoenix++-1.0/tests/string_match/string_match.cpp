@@ -151,6 +151,8 @@ int main(int argc, char *argv[]) {
     struct timespec begin, end;
 
     get_time (begin);
+    argo::init(100*1024*1024UL);
+
 
     if (argv[1] == NULL)
     {

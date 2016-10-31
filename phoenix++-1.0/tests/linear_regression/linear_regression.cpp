@@ -82,6 +82,7 @@ int main(int argc, char *argv[]) {
     struct timespec begin, end;
 
     get_time (begin);
+    argo::init(100*1024*1024UL);
 
     // Make sure a filename is specified
     if (argv[1] == NULL)

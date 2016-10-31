@@ -282,14 +282,10 @@ int main(int argc, char **argv)
 
     get_time (end);
     print_time("initialize", begin, end);
-    printf("A\n");
     get_time (begin); 
     std::vector<MeanMR::keyval> result;
-    printf("B\n");
     MeanMR meanMR(matrix);
-    printf("C\n");
     meanMR.run(result);
-    printf("D\n");
     get_time (end);
     library_time += time_diff (end, begin);
     printf("PCA Mean: MapReduce Completed\n"); 
