@@ -81,6 +81,7 @@ protected:
     uint64_t num_map_tasks;
     uint64_t num_reduce_tasks;
 
+
     virtual void run_map(data_type* data, uint64_t len);
     virtual void run_reduce();
     virtual void run_merge();
@@ -147,7 +148,8 @@ public:
         // First check for an environment variable, then use the 
         // number of processors
         int threads = atoi(GETENV("MR_NUMTHREADS"));
-        setThreads(threads > 0 ? threads : proc_get_num_cpus(), 0);
+        //setThreads(threads > 0 ? threads : proc_get_num_cpus(), 0);
+        setThreads(2, 0);
     }
 
     virtual ~MapReduce() {
@@ -197,21 +199,36 @@ run (std::vector<keyval>& result)
     timespec begin;    
     std::vector<D> data;
 
-    uint64_t count;
+    uint64_t *count;
     D chunk;
+    D *argo_data;
+
+    uint64_t number_of_nodes = argo::number_of_nodes();
+    uint64_t node_id = argo::node_id();
 
     // Run splitter to generate chunks
     int i = 0;
     get_time (begin);
-    while (static_cast<Impl *>(this)->split(chunk))
-    {
-        data.push_back(chunk);
-        
+    count = argo::conew_<uint64_t>(0);
+    if (argo::node_id() == 0) {
+	while (static_cast<Impl *>(this)->split(chunk))
+    	{
+    	    data.push_back(chunk);
+    	    printf("node id: %d, data: %p, data.data: %p, data.len: %d\n", node_id, &chunk, chunk.data, chunk.len);
+    	}
+	*count = data.size();
     }
-
-    count = data.size();
+    argo::barrier();
+    argo_data = argo::conew_array<D>(*count);
+    if (argo::node_id() == 0) {
+	memcpy(argo_data, &data[0], sizeof(D) * (*count));
+    }
     print_time_elapsed("split phase", begin);
-    return run(&data[0], count, result);
+    int chunk_size = (int)ceil((double)(*count) / number_of_nodes); 
+    int index = chunk_size * node_id;
+    if (index + chunk_size > *count) chunk_size = *count - index;
+    printf("node id: %d, count: %d, index: %d, chunk_size: %d\n", node_id, *count, index, chunk_size);
+    return run(&argo_data[index], chunk_size, result);
 }
 
 template<typename Impl, typename D, typename K, typename V, class Container>
@@ -219,21 +236,16 @@ int MapReduce<Impl, D, K, V, Container>::
 run (D *data, uint64_t count, std::vector<keyval>& result)
 {
     timespec begin;
-    D* argo_data;
     timespec run_begin = get_time();
     // Initialize library
     get_time (begin);
-    //Adding data to sharedMemory
-    argo_data = argo::conew_array<D>(count);
-    for (int i = 0; i < count; i++) {
-        argo_data[i] = data[i];
-    }
+
     // Compute task counts (should make this more adjustable) and then 
     // allocate storage
     this->num_map_tasks = std::min(count, this->num_threads) * 16;
     this->num_reduce_tasks = this->num_threads;
-    dprintf ("num_map_tasks = %d\n", num_map_tasks);
-    dprintf ("num_reduce_tasks = %d\n", num_reduce_tasks);
+    printf ("num_map_tasks = %d\n", num_map_tasks);
+    printf ("num_reduce_tasks = %d\n", num_reduce_tasks);
 
     container.init(this->num_threads, this->num_reduce_tasks);
     this->final_vals = new std::vector<keyval>[this->num_threads];
@@ -246,7 +258,7 @@ run (D *data, uint64_t count, std::vector<keyval>& result)
     // Run map tasks and get intermediate values
     get_time (begin);
 
-    run_map(&argo_data[0], count);
+    run_map(&data[0], count);
     print_time_elapsed("map phase", begin);
 
     dprintf("In scheduler, all map tasks are done, now scheduling reduce tasks\n");
@@ -280,14 +292,13 @@ void MapReduce<Impl, D, K, V, Container>::
 run_map (data_type* data, uint64_t count)
 {
 
-    uint64_t number_of_nodes = argo::number_of_nodes();
-    uint64_t node_number = argo::node_id();
     // Compute map task chunk size
     uint64_t chunk_size = 
         std::max(1, (int)ceil((double)count / this->num_map_tasks));
     
     // Generate tasks by splitting input data and add to queue.
-    for(uint64_t i = node_number; i < this->num_map_tasks; i +=number_of_nodes)
+    //for(uint64_t i = node_number; i < this->num_map_tasks; i +=number_of_nodes)
+    for(uint64_t i = 0; i < this->num_map_tasks; i++)
     {
         uint64_t start = chunk_size * i;
 
@@ -301,6 +312,7 @@ run_map (data_type* data, uint64_t count)
                     {    i, len, (uint64_t)(data+start), lgrp };    
 
             this->taskQueue->enqueue_seq (task, this->num_map_tasks, lgrp);
+	    printf("node: %i, i: %d, start: %d, chunk_size: %d, len: %d, data+start: %p, lgrp: %d\n", argo::node_id(), i, start, chunk_size, len,(data+start), lgrp);
         }
     }
 
@@ -323,6 +335,7 @@ map_worker(thread_loc const& loc, double& time, double& user_time, int& tasks)
 	for (data_type* data = (data_type*)task.data; 
             data < (data_type*)task.data + task.len; ++data) {
             static_cast<Impl *>(this)->map(*data, t);
+	    printf("node: %d, data: %p, data.data: %p, data.len: %d\n", argo::node_id(), data, data->data, data->len);
         }
     	user_time += time_elapsed(user_begin);
     }

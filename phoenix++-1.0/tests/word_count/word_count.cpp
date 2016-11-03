@@ -165,9 +165,11 @@ int main(int argc, char *argv[])
     struct stat finfo;
     char * fname, * disp_num_str;
     struct timespec begin, end;
+    char *argo_data;
 
-    get_time (begin);
     argo::init(100*1024*1024UL);
+    get_time (begin);
+    //__sync_synchronize();
 
 
     // Make sure a filename is specified
@@ -204,6 +206,11 @@ int main(int argc, char *argv[])
     while(r < (uint64_t)finfo.st_size)
         r += pread (fd, fdata + r, finfo.st_size, r);
     CHECK_ERROR (r != (uint64_t)finfo.st_size);
+    argo_data = argo::conew_array<char>(finfo.st_size);
+    if(argo::node_id() == 0) {
+	memcpy(argo_data, fdata, finfo.st_size);
+    }
+    argo::barrier();
 #endif    
     
     // Get the number of results to display
@@ -219,9 +226,10 @@ int main(int argc, char *argv[])
     printf("Wordcount: Calling MapReduce Scheduler Wordcount\n");
     get_time (begin);
     std::vector<WordsMR::keyval> result;    
-    WordsMR mapReduce(fdata, finfo.st_size, 1024*1024);
+    WordsMR mapReduce(argo_data, finfo.st_size, 1024*1024);
     CHECK_ERROR( mapReduce.run(result) < 0);
     get_time (end);
+    argo::barrier();
 
 #ifdef TIMING
     print_time("library", begin, end);
@@ -257,6 +265,9 @@ int main(int argc, char *argv[])
 #ifdef TIMING
     print_time("finalize", begin, end);
 #endif
+
+    argo::codelete_array(argo_data);
+    argo::finalize();
 
     return 0;
 }
