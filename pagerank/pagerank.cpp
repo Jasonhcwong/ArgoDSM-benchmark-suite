@@ -151,8 +151,8 @@ void read_graph_from_file(std::string filename) {
 
 void write_pagerank_to_file(std::string filename, double* pagerank, int size) {
     std::ofstream output(filename);
-    output << std::fixed;
-    output << std::setprecision(6);
+    //output << std::fixed;
+    //output << std::setprecision(6);
     for(int i = 0; i < size; i++) {
         if(exists[i])
             output << "pr(" << i << ") = " << pagerank[i] << "\n";
