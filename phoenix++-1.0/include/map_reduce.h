@@ -273,6 +273,7 @@ run (D *data, uint64_t count, std::vector<keyval>& result)
     get_time (begin);
     run_merge();
     print_time_elapsed("merge phase", begin);
+
     
     result.swap(*this->final_vals);
     
@@ -542,6 +543,45 @@ protected:
         }
 
         assert(merge_queues == 1);
+
+	// argo's merge
+    	// number of keyval pairs
+    	int *result_count;
+    	result_count = argo::conew_array<int>(argo::number_of_nodes());
+    	result_count[argo::node_id()] = this->final_vals->size();
+    	argo::barrier();
+    	// allocate argo data
+    	int sum = 0;
+    	int start = 0;
+    	keyval *argo_result_tmp;
+    	for(int i = 0; i < argo::number_of_nodes(); i++) {
+    	    sum += result_count[i];
+    	    if (i < argo::node_id()) start += result_count[i];
+    	}
+    	argo_result_tmp = argo::conew_array<keyval>(sum);
+    	// echo node move its own result to argo memory
+    	memcpy(&argo_result_tmp[start], this->final_vals->data(), sizeof(keyval) * this->final_vals->size());
+    	argo::barrier();
+	// merger results from all nodes using a map container
+	std::map<K, keyval> mymap;
+	if (0 == argo::node_id()) {
+	    std::pair<typename std::map<K, keyval>::iterator, bool> ret;
+	    for(int i = 0; i < sum; i++) {
+		ret = mymap.insert(std::pair<K, keyval>(argo_result_tmp[i].key, argo_result_tmp[i]));
+		if(ret.second == false) {
+		    argo_result_tmp[i].val += ret.first->second.val;
+		    mymap.erase(ret.first);
+		    mymap.insert(std::pair<K, keyval>(argo_result_tmp[i].key, argo_result_tmp[i]));
+		}
+	    }
+	    this->final_vals->clear();
+	    // copy merged result to a vector container
+	    for(typename std::map<K, keyval>::reverse_iterator rit = mymap.rbegin(); rit != mymap.rend(); ++rit) {
+		this->final_vals->push_back(rit->second);
+	    }
+	    // sort merged result
+            std::stable_sort(this->final_vals->begin(), this->final_vals->end(), sort_functor(this));
+	}
     }
 
     virtual void merge_worker (thread_loc const& loc, double& time, 
