@@ -43,7 +43,6 @@ Chunk* chunk;
 
 
 // ArgoDMS global variables
-int*         io_node_id;
 int*         global_size;
 Thread_args* arguments;
 bool*        lock_flag;
@@ -53,8 +52,7 @@ double*      pagerank;
 int*         inlinks;
 bool*        exists;
 int*         outlinks;
-int**        W_index;
-
+int*         graph;
 
 
 void* do_work(void* argptr) {
@@ -90,7 +88,7 @@ void* do_work(void* argptr) {
             if (chunk->exists[i]) {
                 chunk->pagerank[i] = ((1-DAMPING_FACTOR)/vertices) + (*dp);
                 for(int j = 0; j < chunk->inlinks[i]; j++)
-                    chunk->pagerank[i] += DAMPING_FACTOR * (pagerank[W_index[chunk->begin+i][j]] / outlinks[W_index[chunk->begin+i][j]]);
+                    chunk->pagerank[i] += DAMPING_FACTOR * (pagerank[graph[(chunk->begin+i)*MAX_DEGREE+j]] / outlinks[graph[(chunk->begin+i*MAX_DEGREE+j)]]);
             }
         }
 
@@ -112,19 +110,13 @@ void* do_work(void* argptr) {
 void read_graph_from_file(std::string filename) {
 
     std::ifstream input(filename);
-    if (!input.good()) {
-        input.close();
-        return;
-    }
-    lock->lock();
-    *io_node_id = argo::node_id();
 
     for(int i = 0; i < MAX_VERTICES; i++) {
         inlinks[i]  = 0;
         exists[i]   = false;
         outlinks[i] = 0;
         for(int j = 0; j < MAX_DEGREE; j++)
-            W_index[i][j] = std::numeric_limits<int>::max();
+            graph[i*MAX_DEGREE+j] = std::numeric_limits<int>::max();
     }
 
     int number0, number1, inter;
@@ -133,7 +125,7 @@ void read_graph_from_file(std::string filename) {
     std::string line;
     while (input >> number0 >> number1) {
         inter = inlinks[number1];
-        W_index[number1][inter] = number0;
+        graph[number1*MAX_DEGREE+inter] = number0;
         inlinks[number1]++;
         outlinks[number0]++;
         exists[number0] = true;
@@ -143,7 +135,6 @@ void read_graph_from_file(std::string filename) {
     }
     *global_size = ++vertex_cnt;
 
-    lock->unlock();
     input.close();
 }
 
@@ -184,20 +175,17 @@ int main(int argc, char* argv[]) {
     lock        = new argo::globallock::global_tas_lock(lock_flag);
 
     global_size = argo::conew_<int>(MAX_VERTICES);
-    io_node_id  = argo::conew_<int>(0);
     pagerank    = argo::conew_array<double>(MAX_VERTICES);
-    inlinks        = argo::conew_array<int>(MAX_VERTICES);
+    inlinks     = argo::conew_array<int>(MAX_VERTICES);
     exists      = argo::conew_array<bool>(MAX_VERTICES);
     outlinks    = argo::conew_array<int>(MAX_VERTICES);
-    W_index     = argo::conew_array<int*>(MAX_VERTICES);
-
-    for (int i = 0; i < MAX_VERTICES; i++)
-        W_index[i] = argo::conew_array<int>(MAX_DEGREE);
+    graph       = argo::conew_array<int>(MAX_VERTICES*MAX_DEGREE);
 
     argo::barrier();
 
     // Read in graph from file by hopefully only one node
-    read_graph_from_file(input_filename);
+    if (argo::node_id() == 0)
+        read_graph_from_file(input_filename);
 
     argo::barrier();
 
@@ -265,7 +253,7 @@ int main(int argc, char* argv[]) {
 
     argo::barrier();
 
-    if (argo::node_id() == *io_node_id)
+    if (argo::node_id() == 0)
         write_pagerank_to_file(output_filename, pagerank, vertices);
 
     delete chunk;
@@ -274,7 +262,7 @@ int main(int argc, char* argv[]) {
     argo::codelete_array(inlinks);
     argo::codelete_array(exists);
     argo::codelete_array(outlinks);
-    argo::codelete_array(W_index);
+    argo::codelete_array(graph);
     argo::codelete_array(pagerank);
     argo::codelete_(lock_flag);
     argo::codelete_array(dp_threads);
