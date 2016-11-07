@@ -21,8 +21,9 @@
 
 // Single Source Shortest Path Constants
 int    MAX_VERTICES     = 2000000;
-int    MAX_DEGREE       = 16;
+int    MAX_DEGREE       = 32;
 int    MAX_THREADS      = 256;
+int    MAX_DISTANCE     = 100000000;
 
 
 struct Thread_args {
@@ -43,12 +44,11 @@ std::vector<argo::globallock::global_tas_lock*>* locks; //[2097152]; //change th
 Thread_args* arguments;
 bool*        lock_flag;
 bool*        lock_flags;
-int*         io_node_id;
 int*         global_size;
 int*         distances;
 bool*        exists;
-int**        weights;
-int**        graph;
+int*         weights;
+int*         graph;
 bool*        terminate;
 int*         global_range;       // starting range set to 1
 
@@ -75,13 +75,13 @@ void* do_work(void* argptr) {
                 if (!exists[v])
                     continue;
                 for (int i = 0; i < MAX_DEGREE; i++) {
-                    if(v < vertices) neighbor = graph[v][i];
+                    if(v < vertices) neighbor = graph[v*MAX_DEGREE+i];
                     if(neighbor >= vertices) break;
 
                     locks->at(neighbor)->lock();
 
-                    if (distances[graph[v][i]] > (distances[v] + weights[v][i]))    //relax, update distance
-                        distances[graph[v][i]] = distances[v] + weights[v][i];
+                    if (distances[graph[v*MAX_DEGREE+i]] > (distances[v] + weights[v*MAX_DEGREE+i]))    //relax, update distance
+                        distances[graph[v*MAX_DEGREE+i]] = distances[v] + weights[v*MAX_DEGREE+i];
 
                     locks->at(neighbor)->unlock();
                 }
@@ -132,19 +132,13 @@ void* do_work(void* argptr) {
 void read_graph_from_file(std::string filename) {
 
     std::ifstream input(filename);
-    if (!input.good()) {
-        input.close();
-        return;
-    }
 
-    lock->lock();
-    *io_node_id = argo::node_id();
     int int_max = std::numeric_limits<int>::max();
 
     for(int j = 0; j < MAX_VERTICES; j++) {
         for(int i = 0; i < MAX_DEGREE; i++) {
-            weights[j][i] = int_max;
-            graph[j][i] = int_max;
+            weights[j*MAX_DEGREE+i] = int_max;
+            graph[j*MAX_DEGREE+i] = int_max;
         }
         exists[j] = false;
     }
@@ -173,15 +167,15 @@ void read_graph_from_file(std::string filename) {
 
         bool is_existing = false;
         for (int i = 0; i < inter; ++i) {
-           if (graph[number0][i] == number1) {
+           if (graph[number0*MAX_DEGREE+i] == number1) {
               is_existing = true;
               break;
            }
         }
 
         if (!is_existing) {
-           graph[number0][inter] = number1;
-           weights[number0][inter] = number2;
+           graph[number0*MAX_DEGREE+inter] = number1;
+           weights[number0*MAX_DEGREE+inter] = number2;
            previous_node = number0;
         }
         if(number0 > vertex_cnt) vertex_cnt = number0;
@@ -190,7 +184,6 @@ void read_graph_from_file(std::string filename) {
 
     *global_size = ++vertex_cnt;
 
-    lock->unlock();
     input.close();
 }
 
@@ -201,9 +194,8 @@ void write_sssp_to_file(std::string filename, int* distances, int size) {
     output << std::fixed;
     output << std::setprecision(6);
     output << "distances:\n";
-    int max_distance = std::numeric_limits<int>::max();
     for(int i = 0; i < size; i++)
-        if(distances[i] < max_distance)
+        if(distances[i] < MAX_DISTANCE)
             output << "distance(" << i << ") = " << distances[i] << "\n";
     output.close();
 }
@@ -232,36 +224,25 @@ int main(int argc, char** argv) {
 
     Thread_args*  arguments    = argo::conew_array<Thread_args>(global_num_threads);
     terminate    = argo::conew_<bool>(false);
-    io_node_id   = argo::conew_<int>(0);
     global_size  = argo::conew_<int>(0);
     global_range = argo::conew_<int>(1);
     lock_flag    = argo::conew_<bool>(false);
     lock_flags   = argo::conew_array<bool>(MAX_VERTICES);
     distances    = argo::conew_array<int>(MAX_VERTICES);
     exists       = argo::conew_array<bool>(MAX_VERTICES);
-    weights      = argo::conew_array<int*>(MAX_VERTICES);
-    graph        = argo::conew_array<int*>(MAX_VERTICES);
-
-    for (int i = 0; i < MAX_VERTICES; i++) {
-        weights[i] = argo::conew_array<int>(MAX_DEGREE);
-        graph[i]   = argo::conew_array<int>(MAX_DEGREE);
-    }
+    weights      = argo::conew_array<int>(MAX_VERTICES*MAX_DEGREE);
+    graph        = argo::conew_array<int>(MAX_VERTICES*MAX_DEGREE);
 
     argo::barrier();
 
     lock  = new argo::globallock::global_tas_lock(lock_flag);
 
-    read_graph_from_file(input_filename);
+    if (argo::node_id() == 0)
+        read_graph_from_file(input_filename);
 
     argo::barrier();
 
     int vertices = *global_size;
-
-    for (int j = 0; j < vertices; j++) {
-        for (int i = 0; i < MAX_DEGREE; i++) {
-            std::cout << "weights["<<j<<"]["<<i<<"] = "<< weights[j][i] << std::endl;
-        }
-    }
 
     locks = new std::vector<argo::globallock::global_tas_lock*>(vertices);
 
@@ -270,10 +251,9 @@ int main(int argc, char** argv) {
 
     // Initialize ArgoDSM global variables
     if (argo::node_id() == 0) {
-        int max = 100000000;
         for(int i = 0; i < MAX_VERTICES; i++) {
             lock_flags[i] = false;
-            distances[i] = max;
+            distances[i] = MAX_DISTANCE;
         }
         distances[source_vertex] = 0;
 
@@ -291,7 +271,7 @@ int main(int argc, char** argv) {
 
     for (int i = 0; i < local_num_threads; i++) {
         int j = node_threads_begin + i;
-        arguments[i].vertices = vertices;
+        arguments[j].vertices = vertices;
         pthread_create(&threads[i], nullptr, do_work, &arguments[j]);
     }
 
@@ -300,7 +280,7 @@ int main(int argc, char** argv) {
 
     argo::barrier();
 
-    if (argo::node_id() == *io_node_id)
+    if (argo::node_id() == 0)
         write_sssp_to_file(output_filename, distances, vertices);
 
     delete lock;
@@ -309,7 +289,6 @@ int main(int argc, char** argv) {
     argo::codelete_(terminate);
     argo::codelete_(global_range);
     argo::codelete_(global_size);
-    argo::codelete_(io_node_id);
     argo::codelete_array(lock_flags);
     argo::codelete_array(distances);
     argo::codelete_array(exists);
