@@ -88,7 +88,7 @@ void* do_work(void* argptr) {
             if (chunk->exists[i]) {
                 chunk->pagerank[i] = ((1-DAMPING_FACTOR)/vertices) + (*dp);
                 for(int j = 0; j < chunk->inlinks[i]; j++)
-                    chunk->pagerank[i] += DAMPING_FACTOR * (pagerank[graph[(chunk->begin+i)*MAX_DEGREE+j]] / outlinks[graph[(chunk->begin+i*MAX_DEGREE+j)]]);
+                    chunk->pagerank[i] += DAMPING_FACTOR * (pagerank[graph[(chunk->begin+i)*MAX_DEGREE+j]] / outlinks[graph[(chunk->begin+i)*MAX_DEGREE+j]]);
             }
         }
 
