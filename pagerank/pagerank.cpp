@@ -206,6 +206,7 @@ int main(int argc, char* argv[]) {
         int thread_chunk = vertices / global_num_threads;
         int rem = vertices % global_num_threads;
         for (int i = 0; i < global_num_threads; i++) {
+            if (i % local_num_threads == 0) node_chunk = 0;
             arguments[i].global_thread_id = i;
             if (rem != 0 && i < rem) {
                 arguments[i].data_begin = node_chunk;
@@ -244,7 +245,7 @@ int main(int argc, char* argv[]) {
 
     for (int i = 0; i < local_num_threads; i++) {
         int j = node_threads_begin + i;
-        arguments[i].vertices = vertices;
+        arguments[j].vertices = vertices;
         pthread_create(&threads[i], nullptr, do_work, &arguments[j]);
     }
 
