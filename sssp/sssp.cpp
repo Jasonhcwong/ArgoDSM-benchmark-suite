@@ -22,7 +22,7 @@
 // Single Source Shortest Path Constants
 int    MAX_VERTICES     = 2000000;
 int    MAX_DEGREE       = 32;
-int    MAX_THREADS      = 256;
+int    MAX_THREADS      = 4;
 int    MAX_DISTANCE     = 100000000;
 
 
@@ -80,8 +80,8 @@ void* do_work(void* argptr) {
 
                     locks->at(neighbor)->lock();
 
-                    if (distances[graph[v*MAX_DEGREE+i]] > (distances[v] + weights[v*MAX_DEGREE+i]))    //relax, update distance
-                        distances[graph[v*MAX_DEGREE+i]] = distances[v] + weights[v*MAX_DEGREE+i];
+                    if (distances[neighbor] > (distances[v] + weights[v*MAX_DEGREE+i]))    //relax, update distance
+                        distances[neighbor] = distances[v] + weights[v*MAX_DEGREE+i];
 
                     locks->at(neighbor)->unlock();
                 }
@@ -99,10 +99,20 @@ void* do_work(void* argptr) {
             argo::barrier(local_num_threads);
 
             int range = *global_range;
-            start = (int) ((range / global_num_threads) * global_thread_id);
-            stop  = (int) ((range / global_num_threads) * (global_thread_id+1));
+            //start = (int) ((range / global_num_threads) * global_thread_id);
+            //stop  = (int) ((range / global_num_threads) * (global_thread_id+1));
+            double tid_d = global_thread_id;
+            double P_d = global_num_threads;
+         double start_d = (range/P_d) * tid_d;
+         double stop_d = (range/P_d) * (tid_d+1.0);
+         start = start_d;//tid * (range/P);
+         stop = stop_d;//(tid+1) * (range/P);
+
+
 
             if(stop > range) stop = range;
+
+            std::cout << "Range: " << range << " > Thread " << global_thread_id << ": " <<  start << " - " << stop << "\n";
 
             if(start == vertices || v > vertices-1) *terminate = true;
 
@@ -134,55 +144,67 @@ void read_graph_from_file(std::string filename) {
     std::ifstream input(filename);
 
     int int_max = std::numeric_limits<int>::max();
+    int degree[MAX_VERTICES];
 
     for(int j = 0; j < MAX_VERTICES; j++) {
         for(int i = 0; i < MAX_DEGREE; i++) {
             weights[j*MAX_DEGREE+i] = int_max;
             graph[j*MAX_DEGREE+i] = int_max;
         }
+        degree[j] = 0;
         exists[j] = false;
     }
 
     int number0, number1, number2;
-    int previous_node = -1;
-    int inter = -1;
     int vertex_cnt = 0;
 
     std::string line;
     while (input >> number0 >> number1 >> number2) {
+
         if (number0 >= MAX_VERTICES) {
             std::cout << "Node " << number0 << " exceeds maximum graph size of " << MAX_VERTICES << "\n";
             exit (EXIT_FAILURE);
         }
-        exists[number0] = true;
-        exists[number1] = true;
-        if(number0 == previous_node)
-           inter++;
-        else inter = 0;
 
-        if (inter >= MAX_DEGREE) {
+        if (degree[number0] >= MAX_DEGREE) {
             std::cout << "Node " << number0 << " exceeds maximum maximum degree of " << MAX_DEGREE << "\n";
             exit (EXIT_FAILURE);
         }
 
         bool is_existing = false;
-        for (int i = 0; i < inter; ++i) {
+        for (int i = 0; i < degree[number0]; ++i) {
            if (graph[number0*MAX_DEGREE+i] == number1) {
               is_existing = true;
               break;
            }
         }
 
+        exists[number0] = true;
+        exists[number1] = true;
+
         if (!is_existing) {
-           graph[number0*MAX_DEGREE+inter] = number1;
-           weights[number0*MAX_DEGREE+inter] = number2;
-           previous_node = number0;
+           graph[number0*MAX_DEGREE+degree[number0]] = number1;
+           weights[number0*MAX_DEGREE+degree[number0]] = number2;
+           degree[number0]++;
         }
+
         if(number0 > vertex_cnt) vertex_cnt = number0;
         if(number1 > vertex_cnt) vertex_cnt = number1;
     }
 
     *global_size = ++vertex_cnt;
+
+    /*
+    std::cout << "Graph:\n";
+    for (int j = 0; j < vertex_cnt; j++) {
+        std::cout << "["<<j<<"]> ";
+        for (int i = 0; i < MAX_DEGREE; i++) {
+            if (graph[j*MAX_DEGREE+i] != int_max)
+            std::cout << i << ":[" << graph[j*MAX_DEGREE+i] << "] ";
+        }
+        std::cout << "\n";
+    }
+    */
 
     input.close();
 }
