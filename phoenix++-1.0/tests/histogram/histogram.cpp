@@ -223,6 +223,8 @@ int main(int argc, char *argv[]) {
     get_time (end);
 
     print_time("finalize", begin, end);
+    argo::barrirer();
+    argo::finalize();
 
     return 0;
 }

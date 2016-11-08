@@ -105,6 +105,7 @@ inline int loc_mem_to_lgrp (void const* addr)
 #if defined(_LINUX_) && defined(NUMA_SUPPORT)
     int mode;
     get_mempolicy(&mode, NULL, 0, (void*)addr, MPOL_F_NODE | MPOL_F_ADDR);
+    printf("mode: %i", mode);
     return mode;
 #elif defined(_SOLARIS_) && defined(NUMA_SUPPORT)
     uint_t info = MEMINFO_VLGRP;

@@ -37,9 +37,9 @@ APPS := \
         histogram \
         linear_regression \
         kmeans \
-	matrix_multiply \
-	pca \
-	string_match \
+		matrix_multiply \
+		pca \
+		string_match \
         word_count \
 #
 default: all

@@ -97,4 +97,3 @@ ifeq ($(LINKAGE),dynamic)
 TARGET = $(LIB_PHOENIX).so
 LIB_DEP =
 endif
-
