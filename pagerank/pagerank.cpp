@@ -243,6 +243,8 @@ int main(int argc, char* argv[]) {
 
     std::vector<pthread_t> threads(local_num_threads);
 
+    auto start = std::chrono::system_clock::now();
+
     for (int i = 0; i < local_num_threads; i++) {
         int j = node_threads_begin + i;
         arguments[j].vertices = vertices;
@@ -252,10 +254,17 @@ int main(int argc, char* argv[]) {
     for (auto &t : threads)
         pthread_join(t, nullptr);
 
+    auto end = std::chrono::system_clock::now();
+    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+
     argo::barrier();
 
-    if (argo::node_id() == 0)
+    if (argo::node_id() == 0) {
         write_pagerank_to_file(output_filename, pagerank, vertices);
+        std::cout << "\nPagerank\n";
+        std::cout << "Argo nodes: " << argo::number_of_nodes() << "\nGlobal threads: " << global_num_threads << "\nLocal threads: " << local_num_threads << "\nGraph: " << input_filename << "\nVertices: " << vertices << "\nIterations: " << ITERATIONS << "\n";
+        std::cout << "Runtime: " << elapsed.count() << " ms\n" << std::endl;
+    }
 
     delete chunk;
     delete lock;

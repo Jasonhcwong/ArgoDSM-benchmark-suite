@@ -22,7 +22,7 @@
 // Single Source Shortest Path Constants
 int    MAX_VERTICES     = 2000000;
 int    MAX_DEGREE       = 32;
-int    MAX_THREADS      = 4;
+int    MAX_THREADS      = 256;
 int    MAX_DISTANCE     = 100000000;
 
 
@@ -99,22 +99,23 @@ void* do_work(void* argptr) {
             argo::barrier(local_num_threads);
 
             int range = *global_range;
-            //start = (int) ((range / global_num_threads) * global_thread_id);
-            //stop  = (int) ((range / global_num_threads) * (global_thread_id+1));
             double tid_d = global_thread_id;
             double P_d = global_num_threads;
-         double start_d = (range/P_d) * tid_d;
-         double stop_d = (range/P_d) * (tid_d+1.0);
-         start = start_d;//tid * (range/P);
-         stop = stop_d;//(tid+1) * (range/P);
-
-
+            double start_d = (range/P_d) * tid_d;
+            double stop_d = (range/P_d) * (tid_d+1.0);
+            start = start_d;
+            stop = stop_d;
 
             if(stop > range) stop = range;
 
-            std::cout << "Range: " << range << " > Thread " << global_thread_id << ": " <<  start << " - " << stop << "\n";
+            //std::cout << "Range: " << range << " > Thread " << global_thread_id << ": " <<  start << " - " << stop << "\n";
 
-            if(start == vertices || v > vertices-1) *terminate = true;
+            if(start == vertices || v > vertices-1) {
+                lock->lock();
+                std::cout << start << " == " << vertices << " || " << v << " > " << vertices-1 << "\n";
+                *terminate = true;
+                lock->unlock();
+            }
 
             argo::barrier(local_num_threads);
         }
@@ -125,6 +126,7 @@ void* do_work(void* argptr) {
             count++;
             if(count < MAX_THREADS) {
                 *terminate = false;
+                std::cout << "Termination reverted\n";
                 *global_range = 1;
             }
         }
@@ -133,6 +135,9 @@ void* do_work(void* argptr) {
         stop = 1;
 
         argo::barrier(local_num_threads);
+
+        if (*terminate)
+            std::cout << "Thread " << global_thread_id << " terminated\n";
     }
     return NULL;
 }
@@ -291,6 +296,8 @@ int main(int argc, char** argv) {
     int node_threads_begin = argo::node_id() * local_num_threads;
     std::vector<pthread_t> threads(local_num_threads);
 
+    auto start = std::chrono::system_clock::now();
+
     for (int i = 0; i < local_num_threads; i++) {
         int j = node_threads_begin + i;
         arguments[j].vertices = vertices;
@@ -300,10 +307,17 @@ int main(int argc, char** argv) {
     for (auto &t : threads)
         pthread_join(t, nullptr);
 
+    auto end = std::chrono::system_clock::now();
+    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+
     argo::barrier();
 
-    if (argo::node_id() == 0)
+    if (argo::node_id() == 0) {
         write_sssp_to_file(output_filename, distances, vertices);
+        std::cout << "\nSingle Source Shortest Path\n";
+        std::cout << "Argo nodes: " << argo::number_of_nodes() << "\nGlobal threads: " << global_num_threads << "\nLocal threads: " << local_num_threads << "\nGraph: " << input_filename << "\n";
+        std::cout << "Runtime: " << elapsed.count() << " ms\n" << std::endl;
+    }
 
     delete lock;
     delete locks;
