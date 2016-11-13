@@ -288,7 +288,6 @@ run (D *data, uint64_t count, std::vector<keyval>& result)
         sum += result_count[i];
         if (i < argo::node_id()) start += result_count[i];
     }
-    argo::codelete_array(result_count);
     argo_result_tmp = argo::conew_array<keyval>(sum);
     // echo node move its own result to argo memory
     std::memcpy(&argo_result_tmp[start], this->final_vals->data(), sizeof(keyval) * this->final_vals->size());
@@ -317,7 +316,7 @@ run (D *data, uint64_t count, std::vector<keyval>& result)
     // Delete structures
     delete [] this->final_vals;
     argo::codelete_array(argo_result_tmp);
-
+    argo::codelete_array(result_count);
 
     print_time_elapsed("run time", run_begin);
 
@@ -597,7 +596,6 @@ protected:
             sum += result_count[i];
             if (i < argo::node_id()) start += result_count[i];
         }
-        argo::codelete_array(result_count);
         argo_result_tmp = argo::conew_array<keyval>(sum);
         // echo node move its own result to argo memory
         std::memcpy(&argo_result_tmp[start], this->final_vals->data(), sizeof(keyval) * this->final_vals->size());
@@ -615,7 +613,6 @@ protected:
                 }
             }
             this->final_vals->clear();
-            argo::codelete_array(argo_result_tmp);
 
             // copy merged result to a vector container
             for (typename std::map<K, keyval>::reverse_iterator rit = mymap.rbegin(); rit != mymap.rend(); ++rit) {
@@ -624,6 +621,10 @@ protected:
             // sort merged result
             std::stable_sort(this->final_vals->begin(), this->final_vals->end(), sort_functor(this));
         }
+        argo::barrier();
+        argo::codelete_array(result_count);
+        argo::codelete_array(argo_result_tmp);
+        
     }
 
     virtual void merge_worker (thread_loc const& loc, double& time,
