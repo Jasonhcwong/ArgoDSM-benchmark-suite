@@ -8,8 +8,8 @@
 *     * Redistributions in binary form must reproduce the above copyright
 *       notice, this list of conditions and the following disclaimer in the
 *       documentation and/or other materials provided with the distribution.
-*     * Neither the name of Stanford University nor the names of its 
-*       contributors may be used to endorse or promote products derived from 
+*     * Neither the name of Stanford University nor the names of its
+*       contributors may be used to endorse or promote products derived from
 *       this software without specific prior written permission.
 *
 * THIS SOFTWARE IS PROVIDED BY STANFORD UNIVERSITY ``AS IS'' AND ANY
@@ -22,7 +22,7 @@
 * ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-*/ 
+*/
 
 #include <sys/mman.h>
 #include <sys/stat.h>
@@ -56,34 +56,34 @@ int grid_size;
 
 /** parse_args()
  *  Parse the user arguments to determine the number of rows and colums
- */  
-void parse_args(int argc, char **argv) 
+ */
+void parse_args(int argc, char **argv)
 {
     int c;
     extern char *optarg;
-    
+
     num_rows = DEF_NUM_ROWS;
     num_cols = DEF_NUM_COLS;
     grid_size = DEF_GRID_SIZE;
-    
-    while ((c = getopt(argc, argv, "r:c:s:")) != EOF) 
+
+    while ((c = getopt(argc, argv, "r:c:s:")) != EOF)
     {
         switch (c) {
-            case 'r':
-                num_rows = atoi(optarg);
-                break;
-            case 'c':
-                num_cols = atoi(optarg);
-                break;
-            case 's':
-                grid_size = atoi(optarg);
-                break;
-            case '?':
-                printf("Usage: %s -r <num_rows> -c <num_cols> -s <max value>\n", argv[0]);
-                exit(1);
+        case 'r':
+            num_rows = atoi(optarg);
+            break;
+        case 'c':
+            num_cols = atoi(optarg);
+            break;
+        case 's':
+            grid_size = atoi(optarg);
+            break;
+        case '?':
+            printf("Usage: %s -r <num_rows> -c <num_cols> -s <max value>\n", argv[0]);
+            exit(1);
         }
     }
-    
+
     if (num_rows <= 0 || num_cols <= 0 || grid_size <= 0) {
         printf("Illegal argument value. All values must be numeric and greater than 0\n");
         exit(1);
@@ -91,7 +91,7 @@ void parse_args(int argc, char **argv)
 
     printf("Number of rows = %d\n", (int)num_rows);
     printf("Number of cols = %d\n", (int)num_cols);
-    printf("Max value for each element = %d\n", (int)grid_size);    
+    printf("Max value for each element = %d\n", (int)grid_size);
 }
 
 /** dump_points()
@@ -100,12 +100,12 @@ void parse_args(int argc, char **argv)
 void dump_points(int *vals, int rows, int cols)
 {
     int i, j;
-    
-    for (i = 0; i < rows; i++) 
+
+    for (i = 0; i < rows; i++)
     {
         for (j = 0; j < cols; j++)
         {
-            printf("%5d ",vals[i*cols+j]);
+            printf("%5d ", vals[i * cols + j]);
         }
         printf("\n");
     }
@@ -114,13 +114,13 @@ void dump_points(int *vals, int rows, int cols)
 /** generate_points()
  *  Create the values in the matrix
  */
-void generate_points(int *pts, int rows, int cols) 
-{    
+void generate_points(int *pts, int rows, int cols)
+{
     int i, j;
-       
-    for (i=0; i<rows; i++) 
+
+    for (i = 0; i < rows; i++)
     {
-        for (j=0; j<cols; j++) 
+        for (j = 0; j < cols; j++)
         {
             pts[i * cols + j] = rand() % grid_size;
         }
@@ -128,16 +128,16 @@ void generate_points(int *pts, int rows, int cols)
 }
 
 #ifdef MUST_USE_HASH
-class MeanMR : public MapReduce<MeanMR, pca_map_data_t, int, long long, hash_container<int, long long, one_combiner, std::tr1::hash<int>
+class MeanMR : public MapReduce < MeanMR, pca_map_data_t, int, long long, hash_container < int, long long, one_combiner, std::tr1::hash<int>
 #elif defined(MUST_USE_FIXED_HASH)
-class MeanMR : public MapReduce<MeanMR, pca_map_data_t, int, long long, fixed_hash_container<int, long long, one_combiner, 32768, std::tr1::hash<int>
+class MeanMR : public MapReduce < MeanMR, pca_map_data_t, int, long long, fixed_hash_container < int, long long, one_combiner, 32768, std::tr1::hash<int>
 #else
-class MeanMR : public MapReduce<MeanMR, pca_map_data_t, int, long long, common_array_container<int, long long, one_combiner, 1000
+class MeanMR : public MapReduce < MeanMR, pca_map_data_t, int, long long, common_array_container < int, long long, one_combiner, 1000
 #endif
 #ifdef TBB
     , tbb::scalable_allocator
 #endif
-> >
+    > >
 {
     int *matrix;
     int row;
@@ -157,12 +157,12 @@ public:
     {
         long long sum = 0;
         int const* m = data.matrix + data.row_num * num_cols;
-        for(int j = 0; j < num_cols; j++)
+        for (int j = 0; j < num_cols; j++)
         {
             sum += m[j];
         }
-        emit_intermediate(out, data.row_num, sum/num_cols);
-    }    
+        emit_intermediate(out, data.row_num, sum / num_cols);
+    }
 
     int split(pca_map_data_t& out)
     {
@@ -174,23 +174,23 @@ public:
 
         out.matrix = matrix;
         out.row_num = row++;
-        
+
         /* Return true since the out data is valid. */
         return 1;
     }
 };
 
 #ifdef MUST_USE_HASH
-class CovMR : public MapReduceSort<CovMR, pca_cov_data_t, intptr_t, long long, hash_container<intptr_t, long long, one_combiner, std::tr1::hash<intptr_t>
+class CovMR : public MapReduceSort < CovMR, pca_cov_data_t, intptr_t, long long, hash_container < intptr_t, long long, one_combiner, std::tr1::hash<intptr_t>
 #elif defined(MUST_USE_FIXED_HASH)
-class CovMR : public MapReduceSort<CovMR, pca_cov_data_t, intptr_t, long long, fixed_hash_container<intptr_t, long long, one_combiner, 256, std::tr1::hash<intptr_t>
+class CovMR : public MapReduceSort < CovMR, pca_cov_data_t, intptr_t, long long, fixed_hash_container < intptr_t, long long, one_combiner, 256, std::tr1::hash<intptr_t>
 #else
-class CovMR : public MapReduceSort<CovMR, pca_cov_data_t, intptr_t, long long, common_array_container<intptr_t, long long, one_combiner, 1000*1000
+class CovMR : public MapReduceSort < CovMR, pca_cov_data_t, intptr_t, long long, common_array_container < intptr_t, long long, one_combiner, 1000 * 1000
 #endif
 #ifdef TBB
     , tbb::scalable_allocatorrun
 #endif
-> >
+    > >
 {
     int *matrix;
     long long const* means;
@@ -198,7 +198,7 @@ class CovMR : public MapReduceSort<CovMR, pca_cov_data_t, intptr_t, long long, c
     int col;
 
 public:
-    explicit CovMR(int* _matrix, long long const* _means) : 
+    explicit CovMR(int* _matrix, long long const* _means) :
         matrix(_matrix), means(_means), row(0), col(0) {}
 
     void* locate(data_type* d, uint64_t len) const
@@ -208,21 +208,22 @@ public:
 
     /** pca_cov_map()
      *  Map task for computing the covariance matrix
-     * 
+     *
      */
     void map(data_type const& data, map_container& out) const
     {
-        int const* v1 = data.matrix + data.row_num*num_cols;
-        int const* v2 = data.matrix + data.col_num*num_cols;
+        int const* v1 = data.matrix + data.row_num * num_cols;
+        int const* v2 = data.matrix + data.col_num * num_cols;
         long long m1 = data.means[data.row_num];
         long long m2 = data.means[data.col_num];
         long long sum = 0;
-        for(int i = 0; i < num_cols; i++)
+        for (int i = 0; i < num_cols; i++)
         {
             sum += (v1[i] - m1) * (v2[i] - m2);
         }
-        sum /= (num_cols-1);
-        emit_intermediate(out, data.row_num*num_cols + data.col_num, sum);
+        sum /= (num_cols - 1);
+
+        emit_intermediate(out, data.row_num * num_cols + data.col_num, sum);
     }
 
     /** pca_cov_split()
@@ -243,14 +244,14 @@ public:
         out.col_num = col;
 
         col++;
-        if(col >= num_rows) // yes, num_rows
+        if (col >= num_rows) // yes, num_rows
         {
             row++;
-            // will only compute upper right triangle since 
+            // will only compute upper right triangle since
             // covariance matrix is symmetric
-            col = row;        
+            col = row;
         }
-        
+
         /* Return true since the out data is valid. */
         return 1;
     }
@@ -263,49 +264,54 @@ int main(int argc, char **argv)
     double library_time = 0;
 
     get_time (begin);
-    
-    parse_args(argc, argv);    
-    
+
+    parse_args(argc, argv);
+    int* matrix;
+    argo::init(100 * 1024 * 1024UL);
+
+
     // Allocate space for the matrix
-    int* matrix = (int *)malloc(sizeof(int) * num_rows * num_cols);
-    
-    //Generate random values for all the points in the matrix 
-    generate_points(matrix, num_rows, num_cols);
-    
-    // Print the points
-    dump_points(matrix, num_rows, num_cols);
-    
+    matrix = argo::conew_array<int>(num_rows * num_cols);
+
+    //Generate random values for all the points in the matrix
+    if (argo::node_id() == 0) {
+        generate_points(matrix, num_rows, num_cols);
+        // Print the points
+        dump_points(matrix, num_rows, num_cols);
+    }
     // Setup scheduler args for computing the mean
-    
+    argo::barrier();
     printf("PCA Mean: Calling MapReduce Scheduler\n");
-    argo::init(100*1024*1024UL);
 
     get_time (end);
     print_time("initialize", begin, end);
-    get_time (begin); 
+    get_time (begin);
     std::vector<MeanMR::keyval> result;
     MeanMR meanMR(matrix);
     meanMR.run(result);
     get_time (end);
     library_time += time_diff (end, begin);
-    printf("PCA Mean: MapReduce Completed\n"); 
-    
+    printf("PCA Mean: MapReduce Completed\n");
+    argo::barrier();
     get_time (begin);
-    printf("result_size() = %i, num_rows = %i, first res = %i\n", result.size(), num_rows, result[0].val);
-    assert (result.size() == (size_t)num_rows);
-    
-    long long* means = new long long[num_rows];
-    for(size_t i = 0; i < result.size(); i++)
-    {
-        means[result[i].key] = result[i].val;
+    printf("result_size() = %i, num_rows = %i\n", result.size(), num_rows);
+    if (argo::node_id() == 0) {
+        assert (result.size() == (size_t)num_rows);
     }
-
+    long long* means = argo::conew_array<long long>(num_rows);;
+    if (argo::node_id() == 0) {
+        for (size_t i = 0; i < result.size(); i++)
+        {
+            means[result[i].key] = result[i].val;
+        }
+    }
+    argo::barrier();
     get_time (end);
 
     print_time("inter library", begin, end);
 
     printf("PCA Cov: Calling MapReduce Scheduler\n");
- 
+
     get_time (begin);
     std::vector<CovMR::keyval> result2;
     CovMR covMR(matrix, means);
@@ -317,34 +323,35 @@ int main(int argc, char **argv)
 
     get_time (begin);
 
-    printf("PCA Cov: MapReduce Completed\n"); 
+    printf("PCA Cov: MapReduce Completed\n");
+    if (argo::node_id() == 0) {
+        assert(result2.size() == (size_t)((((num_rows * num_rows) - num_rows) / 2) + num_rows));
 
-    assert(result2.size() == (size_t)((((num_rows * num_rows) - num_rows)/2) + num_rows));
-   
-    // Free the allocated structures
-    int cnt = 0;
-    long long sum = 0;
-    for (size_t i = 0; i < result2.size(); i++) 
-    {
-        sum += result2[i].val;
-        
-        //printf("%5d ", result2[i].val);
-        cnt++;
-        if (cnt == num_rows)
-        {
-            //printf("\n"); 
-            num_rows--;
-            cnt = 0;
+        // Free the allocated structures
+        int cnt = 0;
+        long long sum = 0;
+        if (argo::node_id() == 0) {
+            for (size_t i = 0; i < result2.size(); i++)
+            {
+                sum += result2[i].val;
+
+                cnt++;
+                if (cnt == num_rows)
+                {
+                    //printf("\n");
+                    num_rows--;
+                    cnt = 0;
+                }
+            }
+            printf("\n\nCovariance sum: %lld\n", sum);
         }
     }
-    printf("\n\nCovariance sum: %lld\n", sum);
-    
-    delete [] means;
-    free (matrix);
+    argo::barrier();
+    argo::codelete_array(means);
+    argo::codelete_array(matrix);
 
     get_time (end);
     print_time("finalize", begin, end);
-    argo::barrier();
     argo::finalize();
 
     return 0;
