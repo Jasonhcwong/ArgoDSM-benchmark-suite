@@ -5,6 +5,7 @@
 #include <fstream>
 #include <sstream>
 #include <vector>
+#include <mutex>
 
 #include <pthread.h>
 #include <string>
@@ -13,16 +14,18 @@
 
 // Pagerank Constants
 int    MAX_VERTICES     = 2000000;
-int    MAX_DEGREE       = 16;
+int    MAX_DEGREE       = 32;
 double DAMPING_FACTOR   = 0.85;
 int    ITERATIONS       = 40;
 
 
 struct Thread_args {
     int global_thread_id;
+    int local_thread_id;
     int data_begin;
     int data_end;
     int vertices;
+    pthread_barrier_t* barrier;
 };
 
 struct Chunk {
@@ -36,6 +39,10 @@ struct Chunk {
 
 
 // ArgoDSM node local variables
+int node_id;
+std::vector<double>* dp_local;
+double dp_node;
+std::mutex mutex;
 int global_num_threads;
 int local_num_threads;
 argo::globallock::global_tas_lock *lock; // single lock
@@ -47,7 +54,6 @@ int*         global_size;
 Thread_args* arguments;
 bool*        lock_flag;
 double*      dp;
-double*      dp_threads;
 double*      pagerank;
 int*         inlinks;
 bool*        exists;
@@ -58,29 +64,43 @@ int*         graph;
 void* do_work(void* argptr) {
     Thread_args* args = static_cast<Thread_args*>(argptr);
 
-    int global_thread_id = args->global_thread_id;
-    int data_begin       = args->data_begin;
-    int data_end         = args->data_end;
-    int vertices         = args->vertices;
-    int iterations       = ITERATIONS;
+    int global_thread_id        = args->global_thread_id;
+    int local_thread_id         = args->local_thread_id;
+    int data_begin              = args->data_begin;
+    int data_end                = args->data_end;
+    int vertices                = args->vertices;
+    pthread_barrier_t* barrier  = args->barrier;
+
+    int iterations              = ITERATIONS;
 
     argo::barrier(local_num_threads);
 
     while(iterations > 0) {
-        // think about this
+
+        if (local_thread_id == 0)
+            dp_node = 0;
+
         if(global_thread_id == 0)
             *dp = 0;
 
         argo::barrier(local_num_threads);
 
-        dp_threads[global_thread_id] = 0;
+        dp_local->at(local_thread_id) = 0;
         for(int i = data_begin; i < data_end; i++)
             if(chunk->outlinks[i] == 0)
-                dp_threads[global_thread_id] += DAMPING_FACTOR*(pagerank[chunk->begin+i]/vertices);
+                dp_local->at(local_thread_id) += DAMPING_FACTOR*(pagerank[chunk->begin+i]/vertices);
 
-        lock->lock();
-        *dp = *dp + dp_threads[global_thread_id];
-        lock->unlock();
+        mutex.lock();
+        dp_node += dp_local->at(local_thread_id);
+        mutex.unlock();
+
+        pthread_barrier_wait(barrier);
+
+        if (local_thread_id == 0) {
+            lock->lock();
+            *dp += dp_node;
+            lock->unlock();
+        }
 
         argo::barrier(local_num_threads);
 
@@ -163,14 +183,17 @@ int main(int argc, char* argv[]) {
         return 0;
     }
 
+    node_id = argo::node_id();
     global_num_threads = atoi(argv[1]);
+    local_num_threads = global_num_threads / argo::number_of_nodes();
+
     std::string input_filename = argv[2];
     std::string output_filename = argv[3];
 
     // Declare ArgoDSM global memory variables
     arguments   = argo::conew_array<Thread_args>(global_num_threads);
     dp          = argo::conew_<double>(0);
-    dp_threads  = argo::conew_array<double>(global_num_threads);
+    dp_local    = new std::vector<double>(local_num_threads);
     lock_flag   = argo::conew_<bool>(false);
     lock        = new argo::globallock::global_tas_lock(lock_flag);
 
@@ -184,7 +207,7 @@ int main(int argc, char* argv[]) {
     argo::barrier();
 
     // Read in graph from file by hopefully only one node
-    if (argo::node_id() == 0)
+    if (node_id == 0)
         read_graph_from_file(input_filename);
 
     argo::barrier();
@@ -192,16 +215,14 @@ int main(int argc, char* argv[]) {
     int vertices = *global_size;
 
     // Initialize ArgoDSM global memory variables
-    if (argo::node_id() == 0)
+    if (node_id == 0)
         for(int i = 0; i < vertices; i++)
             pagerank[i] = 1.0/vertices; //  1.0-DAMPING_FACTOR;
 
     argo::barrier();
 
     // Divide the work as equal as possible among global_num_threads
-    local_num_threads = global_num_threads / argo::number_of_nodes();
-
-    if (argo::node_id() == 0) {
+    if (node_id == 0) {
         int node_chunk = 0;
         int thread_chunk = vertices / global_num_threads;
         int rem = vertices % global_num_threads;
@@ -224,7 +245,7 @@ int main(int argc, char* argv[]) {
 
     // Copy relevant graph chunk to local memory of the argo node
     chunk = new Chunk();
-    int node_threads_begin = argo::node_id() * local_num_threads;
+    int node_threads_begin = node_id * local_num_threads;
     chunk->size = arguments[node_threads_begin + local_num_threads - 1].data_end;
     chunk->begin = 0;
     for (int i = 0; i < node_threads_begin; i++)
@@ -242,12 +263,16 @@ int main(int argc, char* argv[]) {
     }
 
     std::vector<pthread_t> threads(local_num_threads);
+    pthread_barrier_t barrier;
+    pthread_barrier_init(&barrier, NULL, local_num_threads);
 
     auto start = std::chrono::system_clock::now();
 
     for (int i = 0; i < local_num_threads; i++) {
         int j = node_threads_begin + i;
+        arguments[j].local_thread_id = i;
         arguments[j].vertices = vertices;
+        arguments[j].barrier = &barrier;
         pthread_create(&threads[i], nullptr, do_work, &arguments[j]);
     }
 
@@ -259,13 +284,14 @@ int main(int argc, char* argv[]) {
 
     argo::barrier();
 
-    if (argo::node_id() == 0) {
+    if (node_id == 0) {
         write_pagerank_to_file(output_filename, pagerank, vertices);
         std::cout << "\nPagerank\n";
         std::cout << "Argo nodes: " << argo::number_of_nodes() << "\nGlobal threads: " << global_num_threads << "\nLocal threads: " << local_num_threads << "\nGraph: " << input_filename << "\nVertices: " << vertices << "\nIterations: " << ITERATIONS << "\n";
         std::cout << "Runtime: " << elapsed.count() << " ms\n" << std::endl;
     }
 
+    delete dp_local;
     delete chunk;
     delete lock;
 
@@ -275,7 +301,6 @@ int main(int argc, char* argv[]) {
     argo::codelete_array(graph);
     argo::codelete_array(pagerank);
     argo::codelete_(lock_flag);
-    argo::codelete_array(dp_threads);
     argo::codelete_(dp);
     argo::codelete_array(arguments);
 
