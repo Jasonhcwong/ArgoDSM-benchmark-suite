@@ -106,10 +106,12 @@ void* do_work(void* argptr) {
         pthread_barrier_wait(barrier);
 
         //For termination Condition
-        if (not_changed_local == local_num_threads) {
-            lock->lock();
-            (*not_changed_global)++;
-            lock->unlock();
+        if (local_thread_id == 0) {
+            if (not_changed_local == local_num_threads) {
+                lock->lock();
+                (*not_changed_global)++;
+                lock->unlock();
+            }
         }
 
         //Third phase, assign components
