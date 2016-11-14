@@ -32,14 +32,18 @@ struct Chunk {
 
 
 // ArgoDSM node local variables
-int number_of_nodes;
 int node_id;
+int number_of_nodes;
 int global_num_threads;
 int local_num_threads;
-argo::globallock::global_tas_lock *lock; // single lock
+Chunk* chunk;
+
+// Lock to guard not_changed_global
+argo::globallock::global_tas_lock *lock;
+
+// Mutex to guard not_changed_local
 std::mutex mutex;
 int not_changed_local;
-Chunk* chunk;
 
 
 // ArgoDMS global variables
@@ -67,14 +71,9 @@ void* do_work(void* argptr) {
 
     argo::barrier(local_num_threads);
 
-    //Each component is its own, first phase
-    for(int i = data_begin; i < data_end; i++)
-        components[chunk->begin+i] = chunk->begin+i;
-
-    argo::barrier(local_num_threads);
-
-    //start connecting, second phase
+    // Start connecting, second phase
     while(*not_changed_global < number_of_nodes) {
+
         mod = false;
         iterations++;
         for (int j = data_begin; j < data_end; j++) {
@@ -89,23 +88,22 @@ void* do_work(void* argptr) {
             }
         }
 
+        //For termination Condition
         if (local_thread_id == 0)
             not_changed_local = 0;
+
+        pthread_barrier_wait(barrier);
+
+        if (!mod) {
+            std::lock_guard<std::mutex> guard(mutex);
+            not_changed_local++;
+        }
 
         if (global_thread_id == 0)
             *not_changed_global = 0;
 
         argo::barrier(local_num_threads);
 
-        if (!mod) {
-            mutex.lock();
-            not_changed_local++;
-            mutex.unlock();
-        }
-
-        pthread_barrier_wait(barrier);
-
-        //For termination Condition
         if (local_thread_id == 0) {
             if (not_changed_local == local_num_threads) {
                 lock->lock();
@@ -196,6 +194,7 @@ void write_connected_components_to_file(std::string filename, int* components, i
 
 int main(int argc, char** argv) {
 
+    // Startup ArgoDSM
     argo::init(0.5*1024*1024*1024UL);
 
     if (argc != 4) {
@@ -212,11 +211,11 @@ int main(int argc, char** argv) {
 
     if (!global_num_threads) {
         std::cout << "Thread count must be a valid integer greater than 0." << std::endl;
-        printf ("Error:  ");
         return 1;
     }
 
-    Thread_args*  arguments = argo::conew_array<Thread_args>(global_num_threads);
+    // Declare ArgoDSM global memory variables
+    arguments           = argo::conew_array<Thread_args>(global_num_threads);
     global_size         = argo::conew_<int>(0);
     not_changed_global  = argo::conew_<int>(0);
     lock_flag           = argo::conew_<bool>(false);
@@ -229,6 +228,7 @@ int main(int argc, char** argv) {
 
     lock  = new argo::globallock::global_tas_lock(lock_flag);
 
+    // Read in graph from file by one node
     if (node_id == 0)
         read_graph_from_file(input_filename);
 
@@ -236,11 +236,10 @@ int main(int argc, char** argv) {
 
     int vertices = *global_size;
 
-
     // Initialize ArgoDSM global variables
     if (node_id == 0)
-        for(int j = 0; j < global_num_threads; j++)
-            arguments[j].global_thread_id = j;
+        for(int i = 0; i < vertices; i++)
+            components[i] = i;
 
     argo::barrier();
 
@@ -291,6 +290,7 @@ int main(int argc, char** argv) {
 
     auto start = std::chrono::system_clock::now();
 
+    // Startup threads for computation
     for (int i = 0; i < local_num_threads; i++) {
         int j = node_threads_begin + i;
         arguments[j].local_thread_id = i;
@@ -299,6 +299,7 @@ int main(int argc, char** argv) {
         pthread_create(&threads[i], nullptr, do_work, &arguments[j]);
     }
 
+    // Join threads
     for (auto &t : threads)
         pthread_join(t, nullptr);
 
@@ -310,10 +311,14 @@ int main(int argc, char** argv) {
     if (node_id == 0) {
         write_connected_components_to_file(output_filename, components, vertices);
         std::cout << "\nConnected components\n";
-        std::cout << "Argo nodes: " << number_of_nodes << "\nGlobal threads: " << global_num_threads << "\nLocal threads: " << local_num_threads << "\nGraph: " << input_filename << "\n";
+        std::cout << "Argo nodes: " << number_of_nodes;
+        std::cout << "\nGlobal threads: " << global_num_threads;
+        std::cout << "\nLocal threads: " << local_num_threads;
+        std::cout << "\nGraph: " << input_filename << "\n";
         std::cout << "Runtime: " << elapsed.count() << " ms\n" << std::endl;
     }
 
+    delete chunk;
     delete lock;
 
     argo::codelete_array(arguments);

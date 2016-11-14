@@ -90,9 +90,10 @@ void* do_work(void* argptr) {
             if(chunk->outlinks[i] == 0)
                 dp_local->at(local_thread_id) += DAMPING_FACTOR*(pagerank[chunk->begin+i]/vertices);
 
-        mutex.lock();
-        dp_node += dp_local->at(local_thread_id);
-        mutex.unlock();
+        {
+            std::lock_guard<std::mutex> guard(mutex);
+            dp_node += dp_local->at(local_thread_id);
+        }
 
         pthread_barrier_wait(barrier);
 
@@ -179,8 +180,8 @@ int main(int argc, char* argv[]) {
     argo::init(0.5*1024*1024*1024UL);
 
     if (argc != 4) {
-        std::cout << "Wrong number of arguments" << std::endl;
-        return 0;
+        std::cout << "Usage: " << argv[0] << " <thread-count> <input-file> <output-file>" << std::endl;
+        return 1;
     }
 
     node_id = argo::node_id();
@@ -189,6 +190,11 @@ int main(int argc, char* argv[]) {
 
     std::string input_filename = argv[2];
     std::string output_filename = argv[3];
+
+    if (!global_num_threads) {
+        std::cout << "Thread count must be a valid integer greater than 0." << std::endl;
+        return 1;
+    }
 
     // Declare ArgoDSM global memory variables
     arguments   = argo::conew_array<Thread_args>(global_num_threads);
@@ -206,7 +212,7 @@ int main(int argc, char* argv[]) {
 
     argo::barrier();
 
-    // Read in graph from file by hopefully only one node
+    // Read in graph from file by one node
     if (node_id == 0)
         read_graph_from_file(input_filename);
 
@@ -268,6 +274,7 @@ int main(int argc, char* argv[]) {
 
     auto start = std::chrono::system_clock::now();
 
+    // Startup threads for computation
     for (int i = 0; i < local_num_threads; i++) {
         int j = node_threads_begin + i;
         arguments[j].local_thread_id = i;
@@ -276,6 +283,7 @@ int main(int argc, char* argv[]) {
         pthread_create(&threads[i], nullptr, do_work, &arguments[j]);
     }
 
+    // Join threads
     for (auto &t : threads)
         pthread_join(t, nullptr);
 
@@ -287,7 +295,12 @@ int main(int argc, char* argv[]) {
     if (node_id == 0) {
         write_pagerank_to_file(output_filename, pagerank, vertices);
         std::cout << "\nPagerank\n";
-        std::cout << "Argo nodes: " << argo::number_of_nodes() << "\nGlobal threads: " << global_num_threads << "\nLocal threads: " << local_num_threads << "\nGraph: " << input_filename << "\nVertices: " << vertices << "\nIterations: " << ITERATIONS << "\n";
+        std::cout << "Argo nodes: " << argo::number_of_nodes();
+        std::cout << "\nGlobal threads: " << global_num_threads;
+        std::cout << "\nLocal threads: " << local_num_threads;
+        std::cout << "\nGraph: " << input_filename;
+        std::cout << "\nVertices: " << vertices;
+        std::cout << "\nIterations: " << ITERATIONS << "\n";
         std::cout << "Runtime: " << elapsed.count() << " ms\n" << std::endl;
     }
 
