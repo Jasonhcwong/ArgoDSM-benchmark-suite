@@ -277,7 +277,7 @@ int main(int argc, char **argv)
     if (argo::node_id() == 0) {
         generate_points(matrix, num_rows, num_cols);
         // Print the points
-        dump_points(matrix, num_rows, num_cols);
+        //dump_points(matrix, num_rows, num_cols);
     }
     // Setup scheduler args for computing the mean
     argo::barrier();
@@ -294,14 +294,13 @@ int main(int argc, char **argv)
     printf("PCA Mean: MapReduce Completed\n");
     argo::barrier();
     get_time (begin);
-    printf("result_size() = %i, num_rows = %i\n", result.size(), num_rows);
     if (argo::node_id() == 0) {
+        printf("result_size() = %i, num_rows = %i\n", result.size(), num_rows);
         assert (result.size() == (size_t)num_rows);
     }
     long long* means = argo::conew_array<long long>(num_rows);;
     if (argo::node_id() == 0) {
-        for (size_t i = 0; i < result.size(); i++)
-        {
+        for (size_t i = 0; i < result.size(); i++) {
             means[result[i].key] = result[i].val;
         }
     }
@@ -325,6 +324,7 @@ int main(int argc, char **argv)
 
     printf("PCA Cov: MapReduce Completed\n");
     if (argo::node_id() == 0) {
+        printf("result_size() = %i, num_rows = %i, asserted value = %i\n", result2.size(), num_rows, (size_t)((((num_rows * num_rows) - num_rows) / 2) + num_rows));
         assert(result2.size() == (size_t)((((num_rows * num_rows) - num_rows) / 2) + num_rows));
 
         // Free the allocated structures
