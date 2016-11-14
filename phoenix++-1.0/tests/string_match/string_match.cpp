@@ -8,8 +8,8 @@
 *     * Redistributions in binary form must reproduce the above copyright
 *       notice, this list of conditions and the following disclaimer in the
 *       documentation and/or other materials provided with the distribution.
-*     * Neither the name of Stanford University nor the names of its 
-*       contributors may be used to endorse or promote products derived from 
+*     * Neither the name of Stanford University nor the names of its
+*       contributors may be used to endorse or promote products derived from
 *       this software without specific prior written permission.
 *
 * THIS SOFTWARE IS PROVIDED BY STANFORD UNIVERSITY ``AS IS'' AND ANY
@@ -22,7 +22,7 @@
 * ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-*/ 
+*/
 
 #include <sys/mman.h>
 #include <sys/stat.h>
@@ -37,29 +37,29 @@
 #define OFFSET 5
 
 typedef struct {
-  char *keys;
-  int keys_len;
-  char *encrypt_file;
+    char *keys;
+    int keys_len;
+    char *encrypt_file;
 } str_map_data_t;
 
- char const* key1 = "Helloworld";
- char const* key2 = "howareyou";
- char const* key3 = "ferrari";
- char const* key4 = "whotheman";
+char const* key1 = "Helloworld";
+char const* key2 = "howareyou";
+char const* key3 = "ferrari";
+char const* key4 = "whotheman";
 
- char *key1_final;
- char *key2_final;
- char *key3_final;
- char *key4_final;
+char *key1_final;
+char *key2_final;
+char *key3_final;
+char *key4_final;
 
 /** compute_hashes()
- *  Simple Cipher to generate a hash of the word 
+ *  Simple Cipher to generate a hash of the word
  */
 void compute_hashes(char const* word, unsigned int length, char* final_word)
 {
     unsigned int i;
-    for(i=0;i<length;i++)
-        final_word[i] = word[i]+OFFSET;
+    for (i = 0; i < length; i++)
+        final_word[i] = word[i] + OFFSET;
     final_word[i] = 0;
 }
 
@@ -67,7 +67,7 @@ class MatchMR : public MapReduce<MatchMR, str_map_data_t, int, int>
 {
     char *keys_file, *encrypt_file;
     int keys_file_len, encrypt_file_len;
-    int splitter_pos, chunk_size;    
+    int splitter_pos, chunk_size;
 
 public:
     explicit MatchMR(char* keys, int keys_len, char* encrypt, int encrypt_len, int chunk_size) : keys_file(keys), encrypt_file(encrypt), keys_file_len(keys_len), encrypt_file_len(encrypt_len), splitter_pos(0), chunk_size(chunk_size) {}
@@ -82,29 +82,29 @@ public:
         char cur_word_final[MAX_REC_LEN];
 
         int index = 0;
-        while(index < data.keys_len)
+        while (index < data.keys_len)
         {
             char* key = data.keys + index;
             int len = 0;
-            while(index+len < data.keys_len && data.keys[index+len] != '\r' && data.keys[index+len] != '\n')
+            while (index + len < data.keys_len && data.keys[index + len] != '\r' && data.keys[index + len] != '\n')
                 len++;
 
             compute_hashes(key, len, cur_word_final);
 
-            if(!strcmp(key1_final, cur_word_final));
-                dprintf("FOUND: WORD IS %s\n", key1);
+            if (!strcmp(key1_final, cur_word_final));
+            dprintf("FOUND: WORD IS %s\n", key1);
 
-            if(!strcmp(key2_final, cur_word_final));
-                dprintf("FOUND: WORD IS %s\n", key2);
+            if (!strcmp(key2_final, cur_word_final));
+            dprintf("FOUND: WORD IS %s\n", key2);
 
-            if(!strcmp(key3_final, cur_word_final));
-                dprintf("FOUND: WORD IS %s\n", key3);
+            if (!strcmp(key3_final, cur_word_final));
+            dprintf("FOUND: WORD IS %s\n", key3);
 
-            if(!strcmp(key4_final, cur_word_final));
-                dprintf("FOUND: WORD IS %s\n", key4);
+            if (!strcmp(key4_final, cur_word_final));
+            dprintf("FOUND: WORD IS %s\n", key4);
 
             index += len;
-            while(index < data.keys_len && (data.keys[index] == '\r' || data.keys[index] == '\n'))
+            while (index < data.keys_len && (data.keys[index] == '\r' || data.keys[index] == '\n'))
                 index++;
         }
     }
@@ -124,15 +124,15 @@ public:
         int end = std::min(splitter_pos + chunk_size, keys_file_len);
 
         /* Move end point to next word break */
-        while(end < keys_file_len && keys_file[end] != '\r' && keys_file[end] != '\n')
+        while (end < keys_file_len && keys_file[end] != '\r' && keys_file[end] != '\n')
             end++;
 
         /* Set the start of the next data. */
         out.keys = keys_file + splitter_pos;
         out.keys_len = end - splitter_pos;
-        
+
         // Skip line breaks...
-        while(end < keys_file_len && keys_file[end] == '\r' && keys_file[end] == '\n')
+        while (end < keys_file_len && keys_file[end] == '\r' && keys_file[end] == '\n')
             end++;
         splitter_pos = end;
 
@@ -142,16 +142,18 @@ public:
 };
 
 int main(int argc, char *argv[]) {
-    
+
     int fd_keys;
     char *fdata_keys;
     struct stat finfo_keys;
     char *fname_keys;
+    char *argo_data;
+
 
     struct timespec begin, end;
 
     get_time (begin);
-    argo::init(100*1024*1024UL);
+    argo::init(1024 * 1024 * 1024UL);
 
 
     if (argv[1] == NULL)
@@ -164,18 +166,20 @@ int main(int argc, char *argv[]) {
     printf("String Match: Running...\n");
 
     // Read in the file
-    CHECK_ERROR((fd_keys = open(fname_keys,O_RDONLY)) < 0);
+    CHECK_ERROR((fd_keys = open(fname_keys, O_RDONLY)) < 0);
     // Get the file info (for file length)
     CHECK_ERROR(fstat(fd_keys, &finfo_keys) < 0);
+#define NO_MMAP
+
 #ifndef NO_MMAP
 #ifdef MMAP_POPULATE
     // Memory map the file
-    CHECK_ERROR((fdata_keys = (char*)mmap(0, finfo_keys.st_size + 1, 
-        PROT_READ, MAP_PRIVATE | MAP_POPULATE, fd_keys, 0)) == NULL);
+    CHECK_ERROR((fdata_keys = (char*)mmap(0, finfo_keys.st_size + 1,
+                                          PROT_READ, MAP_PRIVATE | MAP_POPULATE, fd_keys, 0)) == NULL);
 #else
     // Memory map the file
-    CHECK_ERROR((fdata_keys = (char*)mmap(0, finfo_keys.st_size + 1, 
-        PROT_READ, MAP_PRIVATE, fd_keys, 0)) == NULL);
+    CHECK_ERROR((fdata_keys = (char*)mmap(0, finfo_keys.st_size + 1,
+                                          PROT_READ, MAP_PRIVATE, fd_keys, 0)) == NULL);
 #endif
 #else
     int ret;
@@ -185,43 +189,51 @@ int main(int argc, char *argv[]) {
 
     ret = read (fd_keys, fdata_keys, finfo_keys.st_size);
     CHECK_ERROR (ret != finfo_keys.st_size);
+    argo_data = argo::conew_array<char>(finfo_keys.st_size);
+    if (argo::node_id() == 0) {
+        std::memcpy(argo_data, fdata_keys, finfo_keys.st_size);
+    }
+    argo::barrier();
 #endif
 
-    key1_final = (char*)malloc(strlen(key1)+1);
-    key2_final = (char*)malloc(strlen(key2)+1);
-    key3_final = (char*)malloc(strlen(key3)+1);
-    key4_final = (char*)malloc(strlen(key4)+1);
+    key1_final = argo::conew_array<char>(strlen(key1) + 1);
+    key2_final = argo::conew_array<char>(strlen(key2) + 1);
+    key3_final = argo::conew_array<char>(strlen(key3) + 1);
+    key4_final = argo::conew_array<char>(strlen(key4) + 1);
 
     compute_hashes(key1, strlen(key1), key1_final);
     compute_hashes(key2, strlen(key2), key2_final);
     compute_hashes(key3, strlen(key3), key3_final);
     compute_hashes(key4, strlen(key4), key4_final);
-    
+
     get_time (end);
 
     print_time("initialize", begin, end);
+    printf("%c\n", argo_data[3]);
 
     printf("String Match: Calling String Match\n");
 
     get_time (begin);
-    MatchMR mr(fdata_keys, finfo_keys.st_size, NULL, 0, 64*1024);
+    MatchMR mr(argo_data, finfo_keys.st_size, NULL, 0, 64 * 1024);
     std::vector<MatchMR::keyval> out;
     CHECK_ERROR (mr.run(out) < 0);
+    printf("%d\n",out.size());
     get_time (end);
 
     print_time("library", begin, end);
 
     get_time (begin);
 
-    free(key1_final);
-    free(key2_final);
-    free(key3_final);
-    free(key4_final);
+    argo::codelete_array(key1_final);
+    argo::codelete_array(key2_final);
+    argo::codelete_array(key3_final);
+    argo::codelete_array(key4_final);
 
 #ifndef NO_MMAP
     CHECK_ERROR(munmap(fdata_keys, finfo_keys.st_size + 1) < 0);
 #else
     free (fdata_keys);
+    argo::codelete_array(argo_data);
 #endif
     CHECK_ERROR(close(fd_keys) < 0);
 
