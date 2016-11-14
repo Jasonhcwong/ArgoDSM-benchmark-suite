@@ -290,7 +290,6 @@ run (D *data, uint64_t count, std::vector<keyval>& result)
         if (i < argo::node_id()) start += result_count[i];
     }
     argo::barrier();
-    printf("%d\n", sum);
     argo_result_tmp = argo::conew_array<keyval>(sum);
     // echo node move its own result to argo memory
     std::memcpy(&argo_result_tmp[start], this->final_vals->data(), sizeof(keyval) * this->final_vals->size());
