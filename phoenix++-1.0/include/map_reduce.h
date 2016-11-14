@@ -239,12 +239,13 @@ run (D *data, uint64_t count, std::vector<keyval>& result)
     // Initialize library
     get_time (begin);
 
+
     // Compute task counts (should make this more adjustable) and then
     // allocate storage
     this->num_map_tasks = std::min(count, this->num_threads) * 16;
     this->num_reduce_tasks = this->num_threads;
-    printf ("num_map_tasks = %d\n", num_map_tasks);
-    printf ("num_reduce_tasks = %d\n", num_reduce_tasks);
+    printf ("num_map_tasks = %d, node_id = %d\n", num_map_tasks, argo::node_id());
+    printf ("num_reduce_tasks = %d, node_id = %d\n", num_reduce_tasks, argo::node_id());
 
     container.init(this->num_threads, this->num_reduce_tasks);
     this->final_vals = new std::vector<keyval>[this->num_threads];
@@ -252,11 +253,11 @@ run (D *data, uint64_t count, std::vector<keyval>& result)
         // Try to avoid a reallocation. Very costly on Solaris.
         this->final_vals[i].reserve(100);
     }
-    print_time_elapsed("library init", begin);
+    printf("1 argo node: %d, finalvals size: %d\n", argo::node_id(), this->final_vals->size());
 
+    print_time_elapsed("library init", begin);
     // Run map tasks and get intermediate values
     get_time (begin);
-
     run_map(&data[0], count);
     print_time_elapsed("map phase", begin);
 
@@ -288,36 +289,39 @@ run (D *data, uint64_t count, std::vector<keyval>& result)
         sum += result_count[i];
         if (i < argo::node_id()) start += result_count[i];
     }
+    argo::barrier();
+    printf("%d\n", sum);
     argo_result_tmp = argo::conew_array<keyval>(sum);
     // echo node move its own result to argo memory
     std::memcpy(&argo_result_tmp[start], this->final_vals->data(), sizeof(keyval) * this->final_vals->size());
+    this->final_vals->clear();
     argo::barrier();
-    // merger results from all nodes using a map container
-    std::map<K, keyval> mymap;
     if (0 == argo::node_id()) {
+        std::map<K, keyval> mymap;
+        std::vector<K> insertOrder;
         std::pair<typename std::map<K, keyval>::iterator, bool> ret;
         for (int i = 0; i < sum; i++) {
             ret = mymap.insert(std::pair<K, keyval>(argo_result_tmp[i].key, argo_result_tmp[i]));
             if (ret.second == false) {
-                argo_result_tmp[i].val += ret.first->second.val;
+                argo_result_tmp[i].val = ret.first->second.val;
                 mymap.erase(ret.first);
                 mymap.insert(std::pair<K, keyval>(argo_result_tmp[i].key, argo_result_tmp[i]));
+            } else {
+                insertOrder.push_back(argo_result_tmp[i].key);
             }
         }
-        this->final_vals->clear();
-        // copy merged result to a vector container
-        for (typename std::map<K, keyval>::reverse_iterator rit = mymap.rbegin(); rit != mymap.rend(); ++rit) {
-            this->final_vals->push_back(rit->second);
+        for (int i = 0; i < insertOrder.size(); ++i) {
+            const K &s = insertOrder[i];
+            this->final_vals->push_back(mymap[s]);
         }
-
-        result.swap(*this->final_vals);
     }
+    result.swap(*this->final_vals);
 
+    argo::barrier();
     // Delete structures
     delete [] this->final_vals;
     argo::codelete_array(argo_result_tmp);
     argo::codelete_array(result_count);
-
     print_time_elapsed("run time", run_begin);
 
     return 0;
@@ -351,8 +355,9 @@ run_map (data_type * data, uint64_t count)
             {    i, len, (uint64_t)(data + start), lgrp };
 
             this->taskQueue->enqueue_seq (task, this->num_map_tasks, lgrp);
-            dprintf("node: %i, i: %d, start: %d, chunk_size: %d, len: %d, data+start: %p, lgrp: %d\n", argo::node_id(), i, start, chunk_size, len, (data + start), lgrp);
+            //printf("node: %i, i: %d, start: %d, chunk_size: %d, len: %d, data+start: %p, lgrp: %d\n", argo::node_id(), i, start, chunk_size, len, (data + start), lgrp);
         }
+
     }
 
     this->start_workers (&map_callback, std::min(num_map_tasks, num_threads), "map");
@@ -624,7 +629,7 @@ protected:
         argo::barrier();
         argo::codelete_array(result_count);
         argo::codelete_array(argo_result_tmp);
-        
+
     }
 
     virtual void merge_worker (thread_loc const& loc, double& time,
