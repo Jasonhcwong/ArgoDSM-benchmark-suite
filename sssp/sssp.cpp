@@ -110,9 +110,8 @@ void* do_work(void* argptr) {
 
             //std::cout << "Range: " << range << " > Thread " << global_thread_id << ": " <<  start << " - " << stop << "\n";
 
-            if(start == vertices || v > vertices-1) {
+            if(start == vertices || v >= vertices) {
                 lock->lock();
-                std::cout << start << " == " << vertices << " || " << v << " > " << vertices-1 << "\n";
                 *terminate = true;
                 lock->unlock();
             }
@@ -126,7 +125,6 @@ void* do_work(void* argptr) {
             count++;
             if(count < MAX_THREADS) {
                 *terminate = false;
-                std::cout << "Termination reverted\n";
                 *global_range = 1;
             }
         }
@@ -135,9 +133,6 @@ void* do_work(void* argptr) {
         stop = 1;
 
         argo::barrier(local_num_threads);
-
-        if (*terminate)
-            std::cout << "Thread " << global_thread_id << " terminated\n";
     }
     return NULL;
 }
@@ -234,7 +229,7 @@ int main(int argc, char** argv) {
     argo::init(0.5*1024*1024*1024UL);
 
     if (argc != 5) {
-        std::cout << "Usage: " << argv[0] << " <thread-count> <input-file> <output-file>" << std::endl;
+        std::cout << "Usage: " << argv[0] << " <thread-count> <input-file> <output-file> <source-vertex>" << std::endl;
         return 1;
     }
 
@@ -249,7 +244,7 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    Thread_args*  arguments    = argo::conew_array<Thread_args>(global_num_threads);
+    arguments    = argo::conew_array<Thread_args>(global_num_threads);
     terminate    = argo::conew_<bool>(false);
     global_size  = argo::conew_<int>(0);
     global_range = argo::conew_<int>(1);
@@ -318,6 +313,9 @@ int main(int argc, char** argv) {
         std::cout << "Argo nodes: " << argo::number_of_nodes() << "\nGlobal threads: " << global_num_threads << "\nLocal threads: " << local_num_threads << "\nGraph: " << input_filename << "\n";
         std::cout << "Runtime: " << elapsed.count() << " ms\n" << std::endl;
     }
+
+    for (int i = 0; i < vertices; i++)
+        delete locks->at(i);
 
     delete lock;
     delete locks;
