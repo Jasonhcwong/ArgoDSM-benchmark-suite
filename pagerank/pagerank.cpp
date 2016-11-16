@@ -5,7 +5,6 @@
 #include <fstream>
 #include <sstream>
 #include <vector>
-#include <mutex>
 
 #include <pthread.h>
 #include <string>
@@ -40,20 +39,19 @@ struct Chunk {
 
 // ArgoDSM node local variables
 int node_id;
+int number_of_nodes;
 std::vector<double>* dp_local;
 double dp_node;
-std::mutex mutex;
 int global_num_threads;
 int local_num_threads;
-argo::globallock::global_tas_lock *lock; // single lock
 Chunk* chunk;
 
 
 // ArgoDMS global variables
 int*         global_size;
 Thread_args* arguments;
-bool*        lock_flag;
 double*      dp;
+double*	     dp_global;
 double*      pagerank;
 int*         inlinks;
 bool*        exists;
@@ -77,30 +75,27 @@ void* do_work(void* argptr) {
 
     while(iterations > 0) {
 
-        if (local_thread_id == 0)
-            dp_node = 0;
-
-        if(global_thread_id == 0)
-            *dp = 0;
-
-        argo::barrier(local_num_threads);
-
         dp_local->at(local_thread_id) = 0;
         for(int i = data_begin; i < data_end; i++)
             if(chunk->outlinks[i] == 0)
                 dp_local->at(local_thread_id) += DAMPING_FACTOR*(pagerank[chunk->begin+i]/vertices);
 
-        {
-            std::lock_guard<std::mutex> guard(mutex);
-            dp_node += dp_local->at(local_thread_id);
-        }
-
         pthread_barrier_wait(barrier);
 
         if (local_thread_id == 0) {
-            lock->lock();
-            *dp += dp_node;
-            lock->unlock();
+	    double sum = 0;
+	    for (int i = 0; i < local_num_threads; i++)
+            	sum += dp_local->at(i); 
+	    dp_global[node_id] = sum;
+        }
+
+        argo::barrier(local_num_threads);
+
+        if (global_thread_id == 0) {
+	    double sum = 0;
+	    for (int i = 0; i < number_of_nodes; i++)
+            	sum += dp_global[i];
+	    *dp = sum;
         }
 
         argo::barrier(local_num_threads);
@@ -122,6 +117,7 @@ void* do_work(void* argptr) {
         argo::barrier(local_num_threads);
 
         iterations--;
+	std::cout << "Iteration: " << ITERATIONS - iterations << "\n";
     }
     return NULL;
 }
@@ -185,8 +181,9 @@ int main(int argc, char* argv[]) {
     }
 
     node_id = argo::node_id();
+    number_of_nodes = argo::number_of_nodes();
     global_num_threads = atoi(argv[1]);
-    local_num_threads = global_num_threads / argo::number_of_nodes();
+    local_num_threads = global_num_threads / number_of_nodes;
 
     std::string input_filename = argv[2];
     std::string output_filename = argv[3];
@@ -200,8 +197,7 @@ int main(int argc, char* argv[]) {
     arguments   = argo::conew_array<Thread_args>(global_num_threads);
     dp          = argo::conew_<double>(0);
     dp_local    = new std::vector<double>(local_num_threads);
-    lock_flag   = argo::conew_<bool>(false);
-    lock        = new argo::globallock::global_tas_lock(lock_flag);
+    dp_global   = argo::conew_array<double>(number_of_nodes);
 
     global_size = argo::conew_<int>(MAX_VERTICES);
     pagerank    = argo::conew_array<double>(MAX_VERTICES);
@@ -295,7 +291,7 @@ int main(int argc, char* argv[]) {
     if (node_id == 0) {
         write_pagerank_to_file(output_filename, pagerank, vertices);
         std::cout << "\nPagerank\n";
-        std::cout << "Argo nodes: " << argo::number_of_nodes();
+        std::cout << "Argo nodes: " << number_of_nodes;
         std::cout << "\nGlobal threads: " << global_num_threads;
         std::cout << "\nLocal threads: " << local_num_threads;
         std::cout << "\nGraph: " << input_filename;
@@ -306,14 +302,14 @@ int main(int argc, char* argv[]) {
 
     delete dp_local;
     delete chunk;
-    delete lock;
 
+    argo::codelete_array(dp_global);
+    argo::codelete_array(inlinks);
     argo::codelete_array(inlinks);
     argo::codelete_array(exists);
     argo::codelete_array(outlinks);
     argo::codelete_array(graph);
     argo::codelete_array(pagerank);
-    argo::codelete_(lock_flag);
     argo::codelete_(dp);
     argo::codelete_array(arguments);
 
