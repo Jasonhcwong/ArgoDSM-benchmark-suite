@@ -97,18 +97,18 @@ public:
 
     void map(data_type const& s, map_container& out) const
     {
-        for (uint64_t i = 0; i < s.len; i++)
-        {
-            s.data[i] = toupper(s.data[i]);
-        }
+        //for (uint64_t i = 0; i < s.len; i++)
+        //{
+        //    s.data[i] = toupper(s.data[i]);
+        //}
 
         uint64_t i = 0;
         while(i < s.len)
         {            
-            while(i < s.len && (s.data[i] < 'A' || s.data[i] > 'Z'))
+            while(i < s.len && (s.data[i] < 'A' || (s.data[i] > 'Z' && s.data[i] < 'a') || s.data[i] > 'z'))
                 i++;
             uint64_t start = i;
-            while(i < s.len && ((s.data[i] >= 'A' && s.data[i] <= 'Z') || s.data[i] == '\''))
+            while(i < s.len && ((s.data[i] >= 'a' && s.data[i] <= 'z') || (s.data[i] >= 'A' && s.data[i] <= 'Z') || s.data[i] == '\''))
                 i++;
             if(i > start)
             {
@@ -167,7 +167,7 @@ int main(int argc, char *argv[])
     struct timespec begin, end;
     char *argo_data;
 
-    argo::init(100*1024*1024UL);
+    argo::init(8*1024*1024*1024UL);
     get_time (begin);
     //__sync_synchronize();
 
@@ -238,20 +238,22 @@ int main(int argc, char *argv[])
 
     get_time (begin);
 
-    unsigned int dn = std::min(disp_num, (unsigned int)result.size());
-    printf("\nWordcount: Results (TOP %d of %lu):\n", dn, result.size());
-    uint64_t total = 0;
-    for (size_t i = 0; i < dn; i++)
-    {
-        printf("%15s - %lu\n", result[result.size()-1-i].key.data, result[result.size()-1-i].val);
-    }
+    if(argo::node_id() == 0) {
+	unsigned int dn = std::min(disp_num, (unsigned int)result.size());
+    	printf("\nWordcount: Results (TOP %d of %lu):\n", dn, result.size());
+    	uint64_t total = 0;
+    	for (size_t i = 0; i < dn; i++)
+    	{
+    	    printf("%15s - %lu\n", result[result.size()-1-i].key.data, result[result.size()-1-i].val);
+    	}
 
-    for(size_t i = 0; i < result.size(); i++)
-    {
-        total += result[i].val;
-    }
+    	for(size_t i = 0; i < result.size(); i++)
+    	{
+    	    total += result[i].val;
+    	}
 
-    printf("Total: %lu\n", total);
+    	printf("Total: %lu\n", total);
+    }
 
 #ifndef NO_MMAP
     CHECK_ERROR(munmap(fdata, finfo.st_size + 1) < 0);

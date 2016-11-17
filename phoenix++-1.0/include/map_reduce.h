@@ -150,7 +150,7 @@ public:
         // number of processors
         int threads = atoi(GETENV("MR_NUMTHREADS"));
         //setThreads(threads > 0 ? threads : proc_get_num_cpus(), 0);
-        setThreads(2, 0);
+        setThreads(8, 0);
     }
 
     virtual ~MapReduce() {
@@ -222,11 +222,12 @@ run (std::vector<keyval>& result)
     if (argo::node_id() == 0) {
         std::memcpy(argo_data, &data[0], sizeof(D) * (*count));
     }
+    argo::barrier();
     print_time_elapsed("split phase", begin);
     int chunk_size = (int)ceil((double)(*count) / number_of_nodes);
     int index = chunk_size * node_id;
     if (index + chunk_size > *count) chunk_size = *count - index;
-    dprintf("node id: %d, count: %d, index: %d, chunk_size: %d\n", node_id, *count, index, chunk_size);
+    printf("node%d: count: %d, index: %d, chunk_size: %d\n", node_id, *count, index, chunk_size);
     return run(&argo_data[index], chunk_size, result);
 }
 
@@ -259,6 +260,7 @@ run (D *data, uint64_t count, std::vector<keyval>& result)
     // Run map tasks and get intermediate values
     get_time (begin);
     run_map(&data[0], count);
+    argo::barrier();
     print_time_elapsed("map phase", begin);
 
     dprintf("In scheduler, all map tasks are done, now scheduling reduce tasks\n");
@@ -266,6 +268,7 @@ run (D *data, uint64_t count, std::vector<keyval>& result)
     // Run reduce tasks and get final values
     get_time (begin);
     run_reduce();
+    argo::barrier();
     print_time_elapsed("reduce phase", begin);
 
     dprintf("In scheduler, all reduce tasks are done, now scheduling merge tasks\n");
@@ -275,7 +278,7 @@ run (D *data, uint64_t count, std::vector<keyval>& result)
     print_time_elapsed("merge phase", begin);
 
 
-
+/*
     //argo merge
     int *result_count;
     result_count = argo::conew_array<int>(argo::number_of_nodes());
@@ -314,13 +317,12 @@ run (D *data, uint64_t count, std::vector<keyval>& result)
             this->final_vals->push_back(mymap[s]);
         }
     }
+*/
     result.swap(*this->final_vals);
 
-    argo::barrier();
     // Delete structures
     delete [] this->final_vals;
-    argo::codelete_array(argo_result_tmp);
-    argo::codelete_array(result_count);
+
     print_time_elapsed("run time", run_begin);
 
     return 0;
@@ -334,6 +336,7 @@ void MapReduce<Impl, D, K, V, Container>::
 run_map (data_type * data, uint64_t count)
 {
 
+    printf("node%i: run_map count: %d\n", argo::node_id(), count);
     // Compute map task chunk size
     uint64_t chunk_size =
         std::max(1, (int)ceil((double)count / this->num_map_tasks));
@@ -354,7 +357,7 @@ run_map (data_type * data, uint64_t count)
             {    i, len, (uint64_t)(data + start), lgrp };
 
             this->taskQueue->enqueue_seq (task, this->num_map_tasks, lgrp);
-            //printf("node: %i, i: %d, start: %d, chunk_size: %d, len: %d, data+start: %p, lgrp: %d\n", argo::node_id(), i, start, chunk_size, len, (data + start), lgrp);
+            //printf("node%i: i: %d, start: %d, chunk_size: %d, len: %d, data+start: %p, lgrp: %d\n", argo::node_id(), i, start, chunk_size, len, (data + start), lgrp);
         }
 
     }
