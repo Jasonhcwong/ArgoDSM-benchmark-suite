@@ -97,19 +97,19 @@ public:
 
     void map(data_type const& s, map_container& out) const
     {
-        //for (uint64_t i = 0; i < s.len; i++)
-        //{
-        //    s.data[i] = toupper(s.data[i]);
-        //}
+        for (uint64_t i = 0; i < s.len; i++)
+        {
+            s.data[i] = toupper(s.data[i]);
+        }
 
         uint64_t i = 0;
         while(i < s.len)
         {            
-            while(i < s.len && (s.data[i] < 'A' || (s.data[i] > 'Z' && s.data[i] < 'a') || s.data[i] > 'z'))
-                i++;
-            uint64_t start = i;
-            while(i < s.len && ((s.data[i] >= 'a' && s.data[i] <= 'z') || (s.data[i] >= 'A' && s.data[i] <= 'Z') || s.data[i] == '\''))
-                i++;
+	    while(i < s.len && (s.data[i] < 'A' || s.data[i] > 'Z'))
+		i++;
+	    uint64_t start = i;
+	    while(i < s.len && ((s.data[i] >= 'A' && s.data[i] <= 'Z') || s.data[i] == '\''))
+		i++;
             if(i > start)
             {
                 s.data[i] = 0;
@@ -167,7 +167,7 @@ int main(int argc, char *argv[])
     struct timespec begin, end;
     char *argo_data;
 
-    argo::init(8*1024*1024*1024UL);
+    argo::init(4*1024*1024*1024UL);
     get_time (begin);
     //__sync_synchronize();
 

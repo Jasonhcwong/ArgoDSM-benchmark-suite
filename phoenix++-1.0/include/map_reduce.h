@@ -45,6 +45,7 @@
 #include "thread_pool.h"
 
 #include "argo/argo.hpp"
+#include "argo/data_distribution/data_distribution.hpp"
 
 template<typename Impl, typename D, typename K, typename V,
          class Container = hash_container<K, V, buffer_combiner> >
@@ -199,36 +200,21 @@ run (std::vector<keyval>& result)
 {
     timespec begin;
     std::vector<D> data;
-
-    uint64_t *count;
+    uint64_t count;
     D chunk;
-    D *argo_data;
-
-    uint64_t number_of_nodes = argo::number_of_nodes();
-    uint64_t node_id = argo::node_id();
 
     // Run splitter to generate chunks
-    int i = 0;
     get_time (begin);
-    count = argo::conew_<uint64_t>(0);
-    if (argo::node_id() == 0) {
-        while (static_cast<Impl *>(this)->split(chunk)) {
-            data.push_back(chunk);
-        }
-        *count = data.size();
+    while (static_cast<Impl *>(this)->split(chunk)) {
+	if (argo::data_distribution::naive_data_distribution<0>::homenode(chunk.data) == argo::node_id()) {
+	    data.push_back(chunk);
+	}
     }
     argo::barrier();
-    argo_data = argo::conew_array<D>(*count);
-    if (argo::node_id() == 0) {
-        std::memcpy(argo_data, &data[0], sizeof(D) * (*count));
-    }
-    argo::barrier();
+    count = data.size();
     print_time_elapsed("split phase", begin);
-    int chunk_size = (int)ceil((double)(*count) / number_of_nodes);
-    int index = chunk_size * node_id;
-    if (index + chunk_size > *count) chunk_size = *count - index;
-    printf("node%d: count: %d, index: %d, chunk_size: %d\n", node_id, *count, index, chunk_size);
-    return run(&argo_data[index], chunk_size, result);
+    printf("node%d: count: %d\n", argo::node_id(), count);
+    return run(&data[0], count, result);
 }
 
 template<typename Impl, typename D, typename K, typename V, class Container>
