@@ -17,6 +17,8 @@
 #include <string>
 
 #include "argo.hpp"
+#include "synchronization/cohort_lock.cpp"
+
 
 
 // Single Source Shortest Path Constants
@@ -36,14 +38,12 @@ struct Thread_args {
 // node local variables
 int global_num_threads;
 int local_num_threads;
-argo::globallock::global_tas_lock *lock; // single lock
-std::vector<argo::globallock::global_tas_lock*>* locks; //[2097152]; //change the number of locks to approx or greater N
+argo::globallock::cohort_lock *lock; // single lock
+std::vector<argo::globallock::cohort_lock*>* locks; //[2097152]; //change the number of locks to approx or greater N
 
 
 // ArgoDSM global variables
 Thread_args* arguments;
-bool*        lock_flag;
-bool*        lock_flags;
 int*         global_size;
 int*         distances;
 bool*        exists;
@@ -248,8 +248,6 @@ int main(int argc, char** argv) {
     terminate    = argo::conew_<bool>(false);
     global_size  = argo::conew_<int>(0);
     global_range = argo::conew_<int>(1);
-    lock_flag    = argo::conew_<bool>(false);
-    lock_flags   = argo::conew_array<bool>(MAX_VERTICES);
     distances    = argo::conew_array<int>(MAX_VERTICES);
     exists       = argo::conew_array<bool>(MAX_VERTICES);
     weights      = argo::conew_array<int>(MAX_VERTICES*MAX_DEGREE);
@@ -257,7 +255,7 @@ int main(int argc, char** argv) {
 
     argo::barrier();
 
-    lock  = new argo::globallock::global_tas_lock(lock_flag);
+    lock  = new argo::globallock::cohort_lock();
 
     if (argo::node_id() == 0)
         read_graph_from_file(input_filename);
@@ -266,17 +264,15 @@ int main(int argc, char** argv) {
 
     int vertices = *global_size;
 
-    locks = new std::vector<argo::globallock::global_tas_lock*>(vertices);
+    locks = new std::vector<argo::globallock::cohort_lock*>(vertices);
 
     for (int i = 0; i < vertices; i++)
-        locks->at(i) = new argo::globallock::global_tas_lock(&lock_flags[i]);
+        locks->at(i) = new argo::globallock::cohort_lock();
 
     // Initialize ArgoDSM global variables
     if (argo::node_id() == 0) {
-        for(int i = 0; i < MAX_VERTICES; i++) {
-            lock_flags[i] = false;
+        for(int i = 0; i < MAX_VERTICES; i++)
             distances[i] = MAX_DISTANCE;
-        }
         distances[source_vertex] = 0;
 
         for(int j = 0; j < global_num_threads; j++)
@@ -323,7 +319,6 @@ int main(int argc, char** argv) {
     argo::codelete_(terminate);
     argo::codelete_(global_range);
     argo::codelete_(global_size);
-    argo::codelete_array(lock_flags);
     argo::codelete_array(distances);
     argo::codelete_array(exists);
     argo::codelete_array(weights);
