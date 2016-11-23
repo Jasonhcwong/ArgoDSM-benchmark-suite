@@ -110,7 +110,7 @@ int main(int argc, char *argv[]) {
     struct timespec begin, end;
 
     get_time (begin);
-    argo::init(100 * 1024 * 1024UL);
+    argo::init(1024 * 1024 * 1024UL);
 
     srand( (unsigned)time( NULL ) );
 
