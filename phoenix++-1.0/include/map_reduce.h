@@ -413,7 +413,8 @@ void MapReduce<Impl, D, K, V, Container>::run_merge ()
         final[0].insert(final[0].end(), this->final_vals[i].begin(),
                         this->final_vals[i].end());
     }
-
+    delete [] this->final_vals;
+    this->final_vals = final;
 
     // argo's merge
     // number of keyval pairs
@@ -456,8 +457,6 @@ void MapReduce<Impl, D, K, V, Container>::run_merge ()
     argo::codelete_array(result_count);
     argo::codelete_array(argo_result_tmp);
 
-    delete [] this->final_vals;
-    this->final_vals = final;
 }
 
 template<typename Impl, typename D, typename K, typename V, class Container>
