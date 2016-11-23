@@ -117,7 +117,7 @@ void* do_work(void* argptr) {
         argo::barrier(local_num_threads);
 
         iterations--;
-	std::cout << "Iteration: " << ITERATIONS - iterations << "\n";
+	//std::cout << "Iteration: " << ITERATIONS - iterations << "\n";
     }
     return NULL;
 }
