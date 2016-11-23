@@ -132,7 +132,7 @@ class MeanMR : public MapReduce < MeanMR, pca_map_data_t, int, long long, hash_c
 #elif defined(MUST_USE_FIXED_HASH)
 class MeanMR : public MapReduce < MeanMR, pca_map_data_t, int, long long, fixed_hash_container < int, long long, one_combiner, 32768, std::tr1::hash<int>
 #else
-class MeanMR : public MapReduce < MeanMR, pca_map_data_t, int, long long, common_array_container < int, long long, one_combiner, 1000
+class MeanMR : public MapReduce < MeanMR, pca_map_data_t, int, long long, common_array_container < int, long long, one_combiner, 8000
 #endif
 #ifdef TBB
     , tbb::scalable_allocator
@@ -185,7 +185,7 @@ class CovMR : public MapReduceSort < CovMR, pca_cov_data_t, intptr_t, long long,
 #elif defined(MUST_USE_FIXED_HASH)
 class CovMR : public MapReduceSort < CovMR, pca_cov_data_t, intptr_t, long long, fixed_hash_container < intptr_t, long long, one_combiner, 256, std::tr1::hash<intptr_t>
 #else
-class CovMR : public MapReduceSort < CovMR, pca_cov_data_t, intptr_t, long long, common_array_container < intptr_t, long long, one_combiner, 1000 * 1000
+class CovMR : public MapReduceSort < CovMR, pca_cov_data_t, intptr_t, long long, common_array_container < intptr_t, long long, one_combiner, 8000 * 8000
 #endif
 #ifdef TBB
     , tbb::scalable_allocatorrun
