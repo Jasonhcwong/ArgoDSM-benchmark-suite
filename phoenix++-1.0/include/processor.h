@@ -93,6 +93,7 @@ static cpu_set_t* proc_get_full_set(void)
    Returns 0 if successful, -1 if failed. */
 inline int proc_bind_thread (int cpu_id)
 {
+    return 0;
 #ifdef _LINUX_
     cpu_set_t   cpu_set;
 
