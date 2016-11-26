@@ -231,8 +231,8 @@ run (D *data, uint64_t count, std::vector<keyval>& result)
     // allocate storage
     this->num_map_tasks = std::min(count, this->num_threads) * 16;
     this->num_reduce_tasks = this->num_threads;
-    printf ("num_map_tasks = %d, node_id = %d\n", num_map_tasks, argo::node_id());
-    printf ("num_reduce_tasks = %d, node_id = %d\n", num_reduce_tasks, argo::node_id());
+    //printf ("num_map_tasks = %d, node_id = %d\n", num_map_tasks, argo::node_id());
+    //printf ("num_reduce_tasks = %d, node_id = %d\n", num_reduce_tasks, argo::node_id());
 
     container.init(this->num_threads, this->num_reduce_tasks);
     this->final_vals = new std::vector<keyval>[this->num_threads];
@@ -240,7 +240,6 @@ run (D *data, uint64_t count, std::vector<keyval>& result)
         // Try to avoid a reallocation. Very costly on Solaris.
         this->final_vals[i].reserve(100);
     }
-    printf("1 argo node: %d, finalvals size: %d\n", argo::node_id(), this->final_vals->size());
 
     print_time_elapsed("library init", begin);
     // Run map tasks and get intermediate values
@@ -473,6 +472,7 @@ void MapReduce<Impl, D, K, V, Container>::start_workers (void (*func)(void*, thr
     // Barrier, wait for all threads to finish.
     CHECK_ERROR (threadPool->wait());
 
+/*
 #ifdef TIMING
     double user_time = 0, work_time = 0, max_user_time = 0,
            min_user_time = std::numeric_limits<double>::max(), max_work_time = 0,
@@ -495,6 +495,7 @@ void MapReduce<Impl, D, K, V, Container>::start_workers (void (*func)(void*, thr
         fprintf (stderr, "%s avg thread time: %.3f    (%.3f, %.3f)\n",
                  stage, work_time / num_threads, min_work_time, max_work_time);
 #endif
+*/
 
     delete [] th_arg_ptrarray;
     delete [] th_arg_array;
