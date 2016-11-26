@@ -200,19 +200,26 @@ run (std::vector<keyval>& result)
 {
     timespec begin;
     std::vector<D> data;
+    using argo_vector = std::vector<D, argo::allocators::dynamic_allocator<D>>;
     uint64_t count;
     D chunk;
 
     // Run splitter to generate chunks
     get_time (begin);
-    while (static_cast<Impl *>(this)->split(chunk)) {
-	if (argo::data_distribution::naive_data_distribution<0>::homenode(chunk.data) == argo::node_id()) {
-	    data.push_back(chunk);
+    argo_vector *argo_data = argo::conew_<argo_vector>();
+    if (0 == argo::node_id()) {
+	while (static_cast<Impl *>(this)->split(chunk)) argo_data->push_back(chunk);
+    }
+    argo::barrier();
+    for (typename argo_vector::iterator it = argo_data->begin(); it != argo_data->end(); ++it) {
+	if (argo::data_distribution::naive_data_distribution<0>::homenode(it->data) == argo::node_id()) {
+	    data.push_back(*it);
 	}
     }
     argo::barrier();
-    count = data.size();
+    argo::codelete_(argo_data);
     print_time_elapsed("split phase", begin);
+    count = data.size();
     printf("node%d: count: %d\n", argo::node_id(), count);
     return run(&data[0], count, result);
 }
