@@ -30,6 +30,7 @@
 #include <assert.h>
 #include <algorithm>
 #include <vector>
+#include <unordered_map>
 #include <queue>
 #include <limits>
 #include <cmath>
@@ -586,6 +587,7 @@ protected:
 
         // argo's merge
         // number of keyval pairs
+timespec begin = get_time();
         int *result_count;
         result_count = argo::conew_array<int>(argo::number_of_nodes());
         result_count[argo::node_id()] = this->final_vals->size();
@@ -602,10 +604,13 @@ protected:
         // echo node move its own result to argo memory
         std::memcpy(&argo_result_tmp[start], this->final_vals->data(), sizeof(keyval) * this->final_vals->size());
         argo::barrier();
+print_time_elapsed("merge global phase", begin);
+begin = get_time();
         // merger results from all nodes using a map container
         if (0 == argo::node_id()) {
-	    std::map<K, keyval> mymap;
-            std::pair<typename std::map<K, keyval>::iterator, bool> ret;
+	    std::unordered_map<K, keyval, class Container::Hash_func> mymap;
+            std::pair<typename std::unordered_map<K, keyval, class Container::Hash_func>::iterator, bool> ret;
+	    timespec begin_merge_results = get_time();
             for (int i = 0; i < sum; i++) {
                 ret = mymap.insert(std::pair<K, keyval>(argo_result_tmp[i].key, argo_result_tmp[i]));
                 if (ret.second == false) {
@@ -616,16 +621,20 @@ protected:
             }
             this->final_vals->clear();
 
+	    print_time_elapsed("merge node0 merge results", begin_merge_results);
+	    timespec begin_copy_sort = get_time();
             // copy merged result to a vector container
             for (auto& iter : mymap) {
                 this->final_vals->push_back(iter.second);
             }
             // sort merged result
             std::stable_sort(this->final_vals->begin(), this->final_vals->end(), sort_functor(this));
+	    print_time_elapsed("merge node0 copy and sort", begin_copy_sort);
         }
         argo::barrier();
         argo::codelete_array(result_count);
         argo::codelete_array(argo_result_tmp);
+print_time_elapsed("merge node0 phase", begin);
 
     }
 

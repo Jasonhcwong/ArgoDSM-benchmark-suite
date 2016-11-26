@@ -145,6 +145,7 @@ class hash_container
 {
 public:
     typedef K key_type;
+    typedef Hash Hash_func ;
     typedef V value_type;
     typedef std::pair<const K, Combiner<V, Allocator> > constKCV;
     typedef std::pair<K, Combiner<V, Allocator> > KCV;
