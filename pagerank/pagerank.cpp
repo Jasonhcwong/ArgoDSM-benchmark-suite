@@ -15,7 +15,7 @@
 int    MAX_VERTICES     = 2000000;
 int    MAX_DEGREE       = 32;
 double DAMPING_FACTOR   = 0.85;
-int    ITERATIONS       = 40;
+int    ITERATIONS       = 80;
 
 
 struct Thread_args {
