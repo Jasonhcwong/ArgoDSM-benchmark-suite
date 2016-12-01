@@ -610,14 +610,15 @@ begin = get_time();
         if (0 == argo::node_id()) {
 	    std::unordered_map<K, keyval, class Container::Hash_func> mymap;
             std::pair<typename std::unordered_map<K, keyval, class Container::Hash_func>::iterator, bool> ret;
+            typename std::unordered_map<K, keyval, class Container::Hash_func>::iterator it;
 	    timespec begin_merge_results = get_time();
             for (int i = 0; i < sum; i++) {
-                ret = mymap.insert(std::pair<K, keyval>(argo_result_tmp[i].key, argo_result_tmp[i]));
-                if (ret.second == false) {
-                    argo_result_tmp[i].val += ret.first->second.val;
-                    mymap.erase(ret.first);
+                it = mymap.find(argo_result_tmp[i].key);
+                if (it == mymap.end()) {
                     mymap.insert(std::pair<K, keyval>(argo_result_tmp[i].key, argo_result_tmp[i]));
-                }
+                } else {
+                    it->second.val += argo_result_tmp[i].val;
+		}
             }
             this->final_vals->clear();
 
