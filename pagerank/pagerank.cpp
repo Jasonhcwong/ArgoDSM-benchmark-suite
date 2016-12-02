@@ -182,8 +182,8 @@ int main(int argc, char* argv[]) {
 
     node_id = argo::node_id();
     number_of_nodes = argo::number_of_nodes();
-    global_num_threads = atoi(argv[1]);
-    local_num_threads = global_num_threads / number_of_nodes;
+    local_num_threads = atoi(argv[1]);
+    global_num_threads = local_num_threads * number_of_nodes;
 
     std::string input_filename = argv[2];
     std::string output_filename = argv[3];
