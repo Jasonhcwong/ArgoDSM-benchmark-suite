@@ -173,14 +173,21 @@ void write_pagerank_to_file(std::string filename, double* pagerank, int size) {
 int main(int argc, char* argv[]) {
 
     // Startup ArgoDSM
+    
+    auto start = std::chrono::system_clock::now(); // TIMING
+
     argo::init(0.5*1024*1024*1024UL);
+
+    node_id = argo::node_id();
+
+    if (node_id == 0)
+    	std::cout << "argo::init runtime: " <<  (std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now() - start).count() / 1000) << " s" << std::endl; // TIMING
 
     if (argc != 4) {
         std::cout << "Usage: " << argv[0] << " <thread-count> <input-file> <output-file>" << std::endl;
         return 1;
     }
 
-    node_id = argo::node_id();
     number_of_nodes = argo::number_of_nodes();
     local_num_threads = atoi(argv[1]);
     global_num_threads = local_num_threads * number_of_nodes;
@@ -192,6 +199,8 @@ int main(int argc, char* argv[]) {
         std::cout << "Thread count must be a valid integer greater than 0." << std::endl;
         return 1;
     }
+
+    start = std::chrono::system_clock::now(); // TIMING
 
     // Declare ArgoDSM global memory variables
     arguments   = argo::conew_array<Thread_args>(global_num_threads);
@@ -208,23 +217,30 @@ int main(int argc, char* argv[]) {
 
     argo::barrier();
 
+    if (node_id == 0)
+    	std::cout << "Global decalarations: " <<  (std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now() - start).count() / 1000) << " s" << std::endl; // TIMING
+
+    start = std::chrono::system_clock::now(); // TIMING
+
     // Read in graph from file by one node
     if (node_id == 0)
         read_graph_from_file(input_filename);
 
     argo::barrier();
 
+    if (node_id == 0)
+    	std::cout << "Reading the graph: " <<  (std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now() - start).count() / 1000) << " s" << std::endl; // TIMING
+
     int vertices = *global_size;
 
+    start = std::chrono::system_clock::now(); // TIMING
+
     // Initialize ArgoDSM global memory variables
-    if (node_id == 0)
-        for(int i = 0; i < vertices; i++)
-            pagerank[i] = 1.0/vertices; //  1.0-DAMPING_FACTOR;
-
-    argo::barrier();
-
     // Divide the work as equal as possible among global_num_threads
     if (node_id == 0) {
+    	for(int i = 0; i < vertices; i++)
+            pagerank[i] = 1.0/vertices; //  1.0-DAMPING_FACTOR;
+
         int node_chunk = 0;
         int thread_chunk = vertices / global_num_threads;
         int rem = vertices % global_num_threads;
@@ -245,6 +261,11 @@ int main(int argc, char* argv[]) {
 
     argo::barrier();
 
+    if (node_id == 0)
+    	std::cout << "Global initializations: " <<  (std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now() - start).count() / 1000) << " s" << std::endl; // TIMING
+
+    start = std::chrono::system_clock::now(); // TIMING
+
     // Copy relevant graph chunk to local memory of the argo node
     chunk = new Chunk();
     int node_threads_begin = node_id * local_num_threads;
@@ -264,11 +285,14 @@ int main(int argc, char* argv[]) {
         chunk->outlinks[j] = outlinks[chunk->begin+j];
     }
 
+    if (node_id == 0)
+    	std::cout << "Data copying: " <<  (std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now() - start).count() / 1000) << " s" << std::endl; // TIMING
+
     std::vector<pthread_t> threads(local_num_threads);
     pthread_barrier_t barrier;
     pthread_barrier_init(&barrier, NULL, local_num_threads);
 
-    auto start = std::chrono::system_clock::now();
+    start = std::chrono::system_clock::now();
 
     // Startup threads for computation
     for (int i = 0; i < local_num_threads; i++) {
@@ -283,21 +307,20 @@ int main(int argc, char* argv[]) {
     for (auto &t : threads)
         pthread_join(t, nullptr);
 
-    auto end = std::chrono::system_clock::now();
-    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
-
     argo::barrier();
+
+    if (node_id == 0)
+    	std::cout << "Parallel runtime: " <<  (std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now() - start).count() / 1000) << " s" << std::endl;
 
     if (node_id == 0) {
         write_pagerank_to_file(output_filename, pagerank, vertices);
-        std::cout << "\nPagerank\n";
-        std::cout << "Argo nodes: " << number_of_nodes;
+        std::cout << "\nPagerank Algorithm";
+        std::cout << "\nArgo nodes: " << number_of_nodes;
         std::cout << "\nGlobal threads: " << global_num_threads;
         std::cout << "\nLocal threads: " << local_num_threads;
         std::cout << "\nGraph: " << input_filename;
         std::cout << "\nVertices: " << vertices;
         std::cout << "\nIterations: " << ITERATIONS << "\n";
-        std::cout << "Runtime: " << elapsed.count() << " ms\n" << std::endl;
     }
 
     delete dp_local;
