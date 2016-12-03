@@ -36,6 +36,8 @@ struct Thread_args {
 
 
 // node local variables
+int node_id;
+int number_of_nodes;
 int global_num_threads;
 int local_num_threads;
 argo::globallock::cohort_lock *lock; // single lock
@@ -141,18 +143,23 @@ void* do_work(void* argptr) {
 
 void read_graph_from_file(std::string filename) {
 
+    std::vector<bool>* exists_tmp = new std::vector<bool>(MAX_VERTICES);
+    std::vector<int>* weights_tmp = new std::vector<int>(MAX_VERTICES * MAX_DEGREE);
+    std::vector<int>* graph_tmp = new std::vector<int>(MAX_VERTICES * MAX_DEGREE);
+
+    std::vector<int>* degree = new std::vector<int>(MAX_VERTICES);
+
     std::ifstream input(filename);
 
     int int_max = std::numeric_limits<int>::max();
-    int degree[MAX_VERTICES];
 
     for(int j = 0; j < MAX_VERTICES; j++) {
         for(int i = 0; i < MAX_DEGREE; i++) {
-            weights[j*MAX_DEGREE+i] = int_max;
-            graph[j*MAX_DEGREE+i] = int_max;
+            weights_tmp->at(j*MAX_DEGREE+i) = int_max;
+            graph_tmp->at(j*MAX_DEGREE+i) = int_max;
         }
-        degree[j] = 0;
-        exists[j] = false;
+        degree->at(j) = 0;
+        exists_tmp->at(j) = false;
     }
 
     int number0, number1, number2;
@@ -166,26 +173,26 @@ void read_graph_from_file(std::string filename) {
             exit (EXIT_FAILURE);
         }
 
-        if (degree[number0] >= MAX_DEGREE) {
+        if (degree->at(number0) >= MAX_DEGREE) {
             std::cout << "Node " << number0 << " exceeds maximum maximum degree of " << MAX_DEGREE << "\n";
             exit (EXIT_FAILURE);
         }
 
         bool is_existing = false;
-        for (int i = 0; i < degree[number0]; ++i) {
-           if (graph[number0*MAX_DEGREE+i] == number1) {
+        for (int i = 0; i < degree->at(number0); ++i) {
+           if (graph_tmp->at(number0*MAX_DEGREE+i) == number1) {
               is_existing = true;
               break;
            }
         }
 
-        exists[number0] = true;
-        exists[number1] = true;
+        exists_tmp->at(number0) = true;
+        exists_tmp->at(number1) = true;
 
         if (!is_existing) {
-           graph[number0*MAX_DEGREE+degree[number0]] = number1;
-           weights[number0*MAX_DEGREE+degree[number0]] = number2;
-           degree[number0]++;
+           graph_tmp->at(number0*MAX_DEGREE+degree->at(number0)) = number1;
+           weights_tmp->at(number0*MAX_DEGREE+degree->at(number0)) = number2;
+           degree->at(number0)++;
         }
 
         if(number0 > vertex_cnt) vertex_cnt = number0;
@@ -194,17 +201,18 @@ void read_graph_from_file(std::string filename) {
 
     *global_size = ++vertex_cnt;
 
-    /*
-    std::cout << "Graph:\n";
     for (int j = 0; j < vertex_cnt; j++) {
-        std::cout << "["<<j<<"]> ";
-        for (int i = 0; i < MAX_DEGREE; i++) {
-            if (graph[j*MAX_DEGREE+i] != int_max)
-            std::cout << i << ":[" << graph[j*MAX_DEGREE+i] << "] ";
-        }
-        std::cout << "\n";
+	exists[j] = exists_tmp->at(j);
+	for (int i = 0; i < degree->at(j); i++) {
+	    weights[j] = weights_tmp->at(j*MAX_DEGREE+i);
+	    graph[j] = graph_tmp->at(j*MAX_DEGREE+i);
+	}
     }
-    */
+
+    delete degree;
+    delete exists_tmp;
+    delete weights_tmp;
+    delete graph_tmp;
 
     input.close();
 }
@@ -226,14 +234,23 @@ void write_sssp_to_file(std::string filename, int* distances, int size) {
 
 int main(int argc, char** argv) {
 
+    auto start = std::chrono::system_clock::now();
+
     argo::init(0.5*1024*1024*1024UL);
+
+    if (node_id == 0)
+    	std::cout << "argo::init: " << std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now() - start).count() / 1000 << " s" << std::endl;
 
     if (argc != 5) {
         std::cout << "Usage: " << argv[0] << " <thread-count> <input-file> <output-file> <source-vertex>" << std::endl;
         return 1;
     }
 
-    global_num_threads = atoi(argv[1]);
+    node_id = argo::node_id();
+    number_of_nodes = argo::number_of_nodes();
+
+    local_num_threads = atoi(argv[1]);
+    global_num_threads = local_num_threads * number_of_nodes;
     std::string input_filename = argv[2];
     std::string output_filename = argv[3];
     int source_vertex = atoi(argv[4]);
@@ -243,6 +260,8 @@ int main(int argc, char** argv) {
         printf ("Error:  ");
         return 1;
     }
+
+    start = std::chrono::system_clock::now();
 
     arguments    = argo::conew_array<Thread_args>(global_num_threads);
     terminate    = argo::conew_<bool>(false);
@@ -255,12 +274,22 @@ int main(int argc, char** argv) {
 
     argo::barrier();
 
+    if (node_id == 0)
+    	std::cout << "Global declarations: " << std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now() - start).count() / 1000 << " s" << std::endl;
+
+    start = std::chrono::system_clock::now();
+
     lock  = new argo::globallock::cohort_lock();
 
-    if (argo::node_id() == 0)
+    if (node_id == 0)
         read_graph_from_file(input_filename);
 
     argo::barrier();
+
+    if (node_id == 0)
+    	std::cout << "Reading graph: " << std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now() - start).count() / 1000 << " s" << std::endl;
+
+    start = std::chrono::system_clock::now();
 
     int vertices = *global_size;
 
@@ -270,7 +299,7 @@ int main(int argc, char** argv) {
         locks->at(i) = new argo::globallock::cohort_lock();
 
     // Initialize ArgoDSM global variables
-    if (argo::node_id() == 0) {
+    if (node_id == 0) {
         for(int i = 0; i < MAX_VERTICES; i++)
             distances[i] = MAX_DISTANCE;
         distances[source_vertex] = 0;
@@ -281,13 +310,15 @@ int main(int argc, char** argv) {
 
     argo::barrier();
 
-    // Divide the work as equal as possible among global_num_threads
-    local_num_threads = global_num_threads / argo::number_of_nodes();
+    if (node_id == 0)
+    	std::cout << "Global initializations: " << std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now() - start).count() / 1000 << " s" << std::endl;
 
-    int node_threads_begin = argo::node_id() * local_num_threads;
+    // Divide the work as equal as possible among global_num_threads
+
+    int node_threads_begin = node_id * local_num_threads;
     std::vector<pthread_t> threads(local_num_threads);
 
-    auto start = std::chrono::system_clock::now();
+    start = std::chrono::system_clock::now();
 
     for (int i = 0; i < local_num_threads; i++) {
         int j = node_threads_begin + i;
@@ -298,16 +329,19 @@ int main(int argc, char** argv) {
     for (auto &t : threads)
         pthread_join(t, nullptr);
 
-    auto end = std::chrono::system_clock::now();
-    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
-
     argo::barrier();
 
-    if (argo::node_id() == 0) {
+    if (node_id == 0)
+    	std::cout << "Parallel runtime: " << std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now() - start).count() / 1000 << " s" << std::endl;
+
+    if (node_id == 0) {
         write_sssp_to_file(output_filename, distances, vertices);
-        std::cout << "\nSingle Source Shortest Path\n";
-        std::cout << "Argo nodes: " << argo::number_of_nodes() << "\nGlobal threads: " << global_num_threads << "\nLocal threads: " << local_num_threads << "\nGraph: " << input_filename << "\n";
-        std::cout << "Runtime: " << elapsed.count() << " ms\n" << std::endl;
+        std::cout << "\nSingle Source Shortest Path";
+        std::cout << "\nArgo nodes: " << number_of_nodes;
+        std::cout << "\nGlobal threads: " << global_num_threads;
+        std::cout << "\nLocal threads: " << local_num_threads;
+	std::cout << "\nGraph: " << input_filename;
+	std::cout << "\nVertices: " << vertices << "\n";
     }
 
     for (int i = 0; i < vertices; i++)
