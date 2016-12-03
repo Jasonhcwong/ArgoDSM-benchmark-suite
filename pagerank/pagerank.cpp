@@ -126,14 +126,19 @@ void* do_work(void* argptr) {
 
 void read_graph_from_file(std::string filename) {
 
+    std::vector<int>* inlinks_tmp = new std::vector<int>(MAX_VERTICES);
+    std::vector<bool>* exists_tmp = new std::vector<bool>(MAX_VERTICES);
+    std::vector<int>* outlinks_tmp = new std::vector<int>(MAX_VERTICES);
+    std::vector<int>* graph_tmp = new std::vector<int>(MAX_VERTICES * MAX_DEGREE);
+
     std::ifstream input(filename);
 
     for(int i = 0; i < MAX_VERTICES; i++) {
-        inlinks[i]  = 0;
-        exists[i]   = false;
-        outlinks[i] = 0;
+        inlinks_tmp->at(i) = 0;
+        exists_tmp->at(i) = false;
+        outlinks_tmp->at(i) = 0;
         for(int j = 0; j < MAX_DEGREE; j++)
-            graph[i*MAX_DEGREE+j] = std::numeric_limits<int>::max();
+            graph_tmp->at(i*MAX_DEGREE+j) = std::numeric_limits<int>::max();
     }
 
     int number0, number1, inter;
@@ -141,16 +146,29 @@ void read_graph_from_file(std::string filename) {
 
     std::string line;
     while (input >> number0 >> number1) {
-        inter = inlinks[number1];
-        graph[number1*MAX_DEGREE+inter] = number0;
-        inlinks[number1]++;
-        outlinks[number0]++;
-        exists[number0] = true;
-        exists[number1] = true;
+        inter = inlinks_tmp->at(number1);
+        graph_tmp->at(number1*MAX_DEGREE+inter) = number0;
+        inlinks_tmp->at(number1)++;
+        outlinks_tmp->at(number0)++;
+        exists_tmp->at(number0) = true;
+        exists_tmp->at(number1) = true;
         if(number0 > vertex_cnt) vertex_cnt = number0;
         if(number1 > vertex_cnt) vertex_cnt = number1;
     }
     *global_size = ++vertex_cnt;
+
+    for (int j = 0; j < vertex_cnt; j++) {
+	inlinks[j] = inlinks_tmp->at(j);
+	outlinks[j] = outlinks_tmp->at(j);
+	exists[j] = exists_tmp->at(j);
+    	for (int i = 0; i < MAX_DEGREE; i++)
+	    graph[j*MAX_DEGREE+i] = graph_tmp->at(j*MAX_DEGREE+i);
+    }
+
+    delete inlinks_tmp;
+    delete outlinks_tmp;
+    delete exists_tmp;
+    delete graph_tmp;
 
     input.close();
 }
