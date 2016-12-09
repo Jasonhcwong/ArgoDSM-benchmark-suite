@@ -160,14 +160,14 @@ public:
 int main(int argc, char *argv[]) 
 {
     int fd;
-    char * fdata;
+    char fdata[100*1024*1024];
     unsigned int disp_num;
     struct stat finfo;
     char * fname, * disp_num_str;
     struct timespec begin, end;
     char *argo_data;
 
-    argo::init(4*1024*1024*1024UL);
+    argo::init(8*1024*1024*1024UL);
     get_time (begin);
     //__sync_synchronize();
 
@@ -189,30 +189,24 @@ int main(int argc, char *argv[])
     // Get the file info (for file length)
     CHECK_ERROR(fstat(fd, &finfo) < 0);
 #ifndef NO_MMAP
-#ifdef MMAP_POPULATE
-    // Memory map the file
-    CHECK_ERROR((fdata = (char*)mmap(0, finfo.st_size + 1, 
-        PROT_READ, MAP_PRIVATE | MAP_POPULATE, fd, 0)) == NULL);
 #else
-    // Memory map the file
-    CHECK_ERROR((fdata = (char*)mmap(0, finfo.st_size + 1, 
-        PROT_READ, MAP_PRIVATE, fd, 0)) == NULL);
-#endif
-#else
-    uint64_t r = 0;
 
-    fdata = (char *)malloc (finfo.st_size);
-    CHECK_ERROR (fdata == NULL);
-    while(r < (uint64_t)finfo.st_size)
-        r += pread (fd, fdata + r, finfo.st_size, r);
-    CHECK_ERROR (r != (uint64_t)finfo.st_size);
+    timespec begin_copy_input = get_time();
     argo_data = argo::conew_array<char>(finfo.st_size);
     if(argo::node_id() == 0) {
-	memcpy(argo_data, fdata, finfo.st_size);
+    	uint64_t r = 0;
+	while(r < (uint64_t)finfo.st_size) {
+	    ssize_t r1 = read (fd, fdata, 100*1024*1024);
+	    if (r1 == -1) break;
+	    memcpy(argo_data+r, fdata, r1);
+	    r += r1;
+	}
+	CHECK_ERROR (r != (uint64_t)finfo.st_size);
     }
     argo::barrier();
+    print_time_elapsed("copy into to argo", begin_copy_input);
 #endif    
-    
+
     // Get the number of results to display
     CHECK_ERROR((disp_num = (disp_num_str == NULL) ? 
       DEFAULT_DISP_NUM : atoi(disp_num_str)) <= 0);
@@ -255,11 +249,6 @@ int main(int argc, char *argv[])
     	printf("Total: %lu\n", total);
     }
 
-#ifndef NO_MMAP
-    CHECK_ERROR(munmap(fdata, finfo.st_size + 1) < 0);
-#else
-    free (fdata);
-#endif
     CHECK_ERROR(close(fd) < 0);
 
     get_time (end);
