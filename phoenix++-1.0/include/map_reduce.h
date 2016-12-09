@@ -80,6 +80,8 @@ protected:
 
     container_type container;
     std::vector<keyval>* final_vals;    // Array to send to merge task.
+    std::unordered_map<K, keyval, class Container::Hash_func> *final_maps;
+    keyval *argo_global_result;
 
     uint64_t num_map_tasks;
     uint64_t num_reduce_tasks;
@@ -587,55 +589,86 @@ protected:
 
         // argo's merge
         // number of keyval pairs
-timespec begin = get_time();
         int *result_count;
         result_count = argo::conew_array<int>(argo::number_of_nodes());
         result_count[argo::node_id()] = this->final_vals->size();
         argo::barrier();
         // allocate argo data
-        int sum = 0;
-        int start = 0;
-        keyval *argo_result_tmp;
+        uint64_t sum = 0;
+        uint64_t start = 0;
         for (int i = 0; i < argo::number_of_nodes(); i++) {
             sum += result_count[i];
             if (i < argo::node_id()) start += result_count[i];
         }
-        argo_result_tmp = argo::conew_array<keyval>(sum);
+        this->argo_global_result = argo::conew_array<keyval>(sum);
+	this->final_maps = new std::unordered_map<K, keyval, class Container::Hash_func>[this->num_threads];
         // echo node move its own result to argo memory
-        std::memcpy(&argo_result_tmp[start], this->final_vals->data(), sizeof(keyval) * this->final_vals->size());
+        std::memcpy(&this->argo_global_result[start], this->final_vals->data(), sizeof(keyval) * this->final_vals->size());
         argo::barrier();
-print_time_elapsed("merge global phase", begin);
-begin = get_time();
         // merger results from all nodes using a map container
+        uint64_t chunk_size = (int) ceil((double) sum / this->num_threads);
         if (0 == argo::node_id()) {
-	    std::unordered_map<K, keyval, class Container::Hash_func> mymap;
-            std::pair<typename std::unordered_map<K, keyval, class Container::Hash_func>::iterator, bool> ret;
-            typename std::unordered_map<K, keyval, class Container::Hash_func>::iterator it;
-	    timespec begin_merge_results = get_time();
-            for (int i = 0; i < sum; i++) {
-                it = mymap.find(argo_result_tmp[i].key);
-                if (it == mymap.end()) {
-                    mymap.insert(std::pair<K, keyval>(argo_result_tmp[i].key, argo_result_tmp[i]));
-                } else {
-                    it->second.val += argo_result_tmp[i].val;
-		}
+	    printf("sum: %lld\n", (long long)sum);
+	    merge_queues = this->num_threads;
+	    // copy argo_global_result to unordered_maps
+            for (int i = 0; i < merge_queues; i++)
+            {
+		uint64_t data_start = i * chunk_size;
+		uint64_t data_len = (data_start + chunk_size > sum) ? (sum - data_start) : chunk_size;
+                task_queue::task_t task =
+                { i, 8, data_start, data_len };
+                this->taskQueue->enqueue_seq(task, merge_queues);
             }
-            this->final_vals->clear();
+            this->start_workers(&this->merge_callback, this->num_threads, "merge");
 
-	    print_time_elapsed("merge node0 merge results", begin_merge_results);
-	    timespec begin_copy_sort = get_time();
+	    // merge maps
+	    // merge 8 maps into 4
+            for (int i = 0; i < 4; i++)
+            {
+		uint64_t data_dest = i;
+		uint64_t data_src = this->num_threads - 1 - i;
+                task_queue::task_t task =
+                { i, 9, data_dest, data_src };
+                this->taskQueue->enqueue_seq(task, merge_queues);
+            }
+            this->start_workers(&this->merge_callback, this->num_threads, "merge");
+
+	    // merge 4 maps into 2
+            for (int i = 0; i < 2; i++)
+            {
+		uint64_t data_dest = i;
+		uint64_t data_src = 4 - 1 - i;
+                task_queue::task_t task =
+                { i, 9, data_dest, data_src };
+                this->taskQueue->enqueue_seq(task, merge_queues);
+            }
+            this->start_workers(&this->merge_callback, this->num_threads, "merge");
+
+	    // merge 2 maps into 1
+	    {
+		typename std::unordered_map<K, keyval, class Container::Hash_func>::iterator it;
+
+		for (auto& iter : this->final_maps[1]) {
+		    it = this->final_maps[0].find(iter.first);
+		    if (it == this->final_maps[0].end()) {
+			this->final_maps[0].insert(std::pair<K, keyval>(iter.second.key, iter.second));
+		    } else {
+			it->second.val += iter.second.val;
+		    }
+		}
+	    }
+
+            this->final_vals->clear();
             // copy merged result to a vector container
-            for (auto& iter : mymap) {
+            for (auto& iter : this->final_maps[0]) {
                 this->final_vals->push_back(iter.second);
             }
             // sort merged result
             std::stable_sort(this->final_vals->begin(), this->final_vals->end(), sort_functor(this));
-	    print_time_elapsed("merge node0 copy and sort", begin_copy_sort);
         }
         argo::barrier();
         argo::codelete_array(result_count);
-        argo::codelete_array(argo_result_tmp);
-print_time_elapsed("merge node0 phase", begin);
+        argo::codelete_array(this->argo_global_result);
 
     }
 
@@ -670,13 +703,60 @@ print_time_elapsed("merge node0 phase", begin);
                            vals[1].begin(), vals[1].end(),
                            this->final_vals[out_index].begin(), sort_functor(this));
             }
-            else
+            else if (length == 7)
             {
-                // for more, do a multiway merge.
-                assert(0);
-            }
-        }
-        time += time_elapsed(begin);
+		uint64_t dest = task.data;
+		uint64_t len = task.pad;
+		typename std::unordered_map<K, keyval, class Container::Hash_func>::iterator it;
+
+		for (int i = dest + 1; i <= len; i++) {
+		    for (auto& iter : this->final_maps[i]) {
+		        it = this->final_maps[dest].find(iter.first);
+		        if (it == this->final_maps[dest].end()) {
+		    	this->final_maps[dest].insert(std::pair<K, keyval>(iter.second.key, iter.second));
+		        } else {
+		    	it->second.val += iter.second.val;
+		        }
+		    }
+		}
+	    }
+            else if (length == 8)
+            {
+		uint64_t start = task.data;
+		uint64_t len = task.pad;
+		typename std::unordered_map<K, keyval, class Container::Hash_func>::iterator it;
+
+		for (uint64_t i = start; i < start+len; ++i) {
+		    it = this->final_maps[task.id].find(this->argo_global_result[i].key);
+		    if (it == this->final_maps[task.id].end()) {
+			this->final_maps[task.id].insert(std::pair<K, keyval>(this->argo_global_result[i].key, this->argo_global_result[i]));
+		    } else {
+			it->second.val += this->argo_global_result[i].val;
+		    }
+		}
+	    }
+            else if (length == 9)
+            {
+		uint64_t dest = task.data;
+		uint64_t src = task.pad;
+		typename std::unordered_map<K, keyval, class Container::Hash_func>::iterator it;
+
+		for (auto& iter : this->final_maps[src]) {
+		    it = this->final_maps[dest].find(iter.first);
+		    if (it == this->final_maps[dest].end()) {
+			this->final_maps[dest].insert(std::pair<K, keyval>(iter.second.key, iter.second));
+		    } else {
+			it->second.val += iter.second.val;
+		    }
+		}
+	    }
+	    else
+	    {
+		// for more, do a multiway merge.
+		assert(0);
+	    }
+	}
+	time += time_elapsed(begin);
     }
 };
 
