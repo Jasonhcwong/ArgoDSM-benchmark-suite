@@ -166,10 +166,10 @@ int main(int argc, char *argv[])
     char * fname, * disp_num_str;
     struct timespec begin, end;
     char *argo_data;
+    long long *argo_data_size;
 
     argo::init(8*1024*1024*1024UL);
     get_time (begin);
-    //__sync_synchronize();
 
 
     // Make sure a filename is specified
@@ -184,27 +184,36 @@ int main(int argc, char *argv[])
 
     printf("Wordcount: Running...\n");
 
-    // Read in the file
-    CHECK_ERROR((fd = open(fname, O_RDONLY)) < 0);
-    // Get the file info (for file length)
-    CHECK_ERROR(fstat(fd, &finfo) < 0);
+    argo_data_size = argo::conew_<long long>();
+    if(argo::node_id() == 0) {
+	// Read in the file
+    	CHECK_ERROR((fd = open(fname, O_RDONLY)) < 0);
+    	// Get the file info (for file length)
+    	CHECK_ERROR(fstat(fd, &finfo) < 0);
+	printf("finfo.st_size: %lld\n", (long long)finfo.st_size);
+	*argo_data_size = (long long)finfo.st_size;
+    }
+    argo::barrier();
+	printf("argo_data_size: %lld\n", (*argo_data_size));
 #ifndef NO_MMAP
 #else
 
-    timespec begin_copy_input = get_time();
-    argo_data = argo::conew_array<char>(finfo.st_size);
+    argo_data = argo::conew_array<char>(*argo_data_size);
     if(argo::node_id() == 0) {
     	uint64_t r = 0;
 	while(r < (uint64_t)finfo.st_size) {
 	    ssize_t r1 = read (fd, fdata, 100*1024*1024);
-	    if (r1 == -1) break;
+	    if (r1 == -1) {
+		printf("errno: %d\n", errno);
+		break;
+	    }
 	    memcpy(argo_data+r, fdata, r1);
 	    r += r1;
 	}
 	CHECK_ERROR (r != (uint64_t)finfo.st_size);
+	CHECK_ERROR(close(fd) < 0);
     }
     argo::barrier();
-    print_time_elapsed("copy into to argo", begin_copy_input);
 #endif    
 
     // Get the number of results to display
@@ -220,7 +229,7 @@ int main(int argc, char *argv[])
     printf("Wordcount: Calling MapReduce Scheduler Wordcount\n");
     get_time (begin);
     std::vector<WordsMR::keyval> result;    
-    WordsMR mapReduce(argo_data, finfo.st_size, 1024*1024);
+    WordsMR mapReduce(argo_data, *argo_data_size, 1024*1024);
     CHECK_ERROR( mapReduce.run(result) < 0);
     get_time (end);
     argo::barrier();
@@ -249,7 +258,6 @@ int main(int argc, char *argv[])
     	printf("Total: %lu\n", total);
     }
 
-    CHECK_ERROR(close(fd) < 0);
 
     get_time (end);
 
